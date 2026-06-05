@@ -1,0 +1,96 @@
+{
+  "name": "@thinwrap/notifications",
+  "version": "1.0.2",
+  "description": "Unified TypeScript facade for 35 notification providers across email, SMS, push, and chat. Stateless, BYO fetch, zero vendor SDKs.",
+  "main": "./dist/cjs/index.js",
+  "module": "./dist/esm/index.js",
+  "types": "./dist/cjs/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/esm/index.d.ts",
+        "default": "./dist/esm/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/index.d.ts",
+        "default": "./dist/cjs/index.js"
+      }
+    }
+  },
+  "files": [
+    "dist",
+    "src/providers/*/README.md",
+    "MIGRATION.md",
+    "CHANGELOG.md"
+  ],
+  "sideEffects": false,
+  "publishConfig": {
+    "provenance": true,
+    "access": "public"
+  },
+  "scripts": {
+    "build": "npm run build:cjs && npm run build:esm && node scripts/fix-esm-imports.mjs",
+    "check:dist": "node scripts/check-dist.mjs",
+    "build:cjs": "tsc -p tsconfig.build.json",
+    "build:esm": "tsc -p tsconfig.esm.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "test:watch": "vitest",
+    "lint": "eslint src/",
+    "lint:fix": "eslint src/ --fix",
+    "lint:frontmatter": "node scripts/validate-frontmatter.mjs",
+    "fix:imports": "node scripts/shorten-imports.mjs",
+    "size": "size-limit",
+    "size:why": "size-limit --why",
+    "check:tree-shaking": "node scripts/check-tree-shaking.mjs"
+  },
+  "keywords": [
+    "notification",
+    "email",
+    "sms",
+    "push",
+    "aws-ses",
+    "resend",
+    "mailgun",
+    "vonage",
+    "twilio",
+    "plivo",
+    "sns",
+    "fcm",
+    "expo",
+    "apns",
+    "chat",
+    "telegram",
+    "slack",
+    "whatsapp",
+    "novu",
+    "lightweight"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/thinwrap/notifications-ts"
+  },
+  "homepage": "https://github.com/thinwrap/notifications-ts#readme",
+  "bugs": {
+    "url": "https://github.com/thinwrap/notifications-ts/issues"
+  },
+  "author": "Dmitry Polyanovsky",
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "@eslint/js": "^9.39.4",
+    "@size-limit/preset-small-lib": "^11.2.0",
+    "@types/node": "^20.19.41",
+    "@vitest/coverage-v8": "^3.2.4",
+    "esbuild": "^0.25.0",
+    "eslint": "^9.39.4",
+    "size-limit": "^11.2.0",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.59.3",
+    "vite": "^6.4.3",
+    "vitest": "^3.2.4"
+  }
+}

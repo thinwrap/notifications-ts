@@ -1,0 +1,76 @@
+name: Publish to npm
+
+# OIDC publish-to-npm with Sigstore provenance.
+#
+# Publish job is inlined (not delegated to an external reusable workflow) so
+# the full publish path is auditable in this repo. Sigstore attests the
+# workflow source; OIDC trusted publishing means no NPM_TOKEN is consumed.
+# Hardware-key 2FA on the npm publishing account is a manual precondition
+# verified at tag time by docs/release-checklist-v1.0.md.
+#
+# Trigger: push of a `v*.*.*` tag to any branch (branch protection on `main`
+# ensures the tag's commit is on a protected branch).
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: read
+  id-token: write       # required for OIDC token exchange with npm
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: publish @thinwrap/notifications
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+          cache: npm
+
+      # OIDC trusted publishing requires npm >= 11.5.1; Node 20 bundles npm 10.
+      - name: Upgrade npm for OIDC trusted publishing
+        run: npm install -g npm@latest
+
+      - name: Verify git tag matches package.json version
+        run: |
+          tag_version="${GITHUB_REF_NAME#v}"
+          pkg_version="$(node -p "require('./package.json').version")"
+          if [ "$tag_version" != "$pkg_version" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME (=$tag_version) does not match package.json version $pkg_version"
+            exit 1
+          fi
+
+      - run: npm ci --no-audit --no-fund --fetch-timeout=60000 --fetch-retries=3 --fetch-retry-maxtimeout=15000
+        timeout-minutes: 8
+
+      - run: npm run typecheck
+
+      - run: npm test
+
+      - run: npm run lint
+
+      - run: npm run lint:frontmatter
+
+      - run: npm run build
+
+      # Plain-Node import smoke of dist (CJS + ESM) — catches broken emits
+      # that bundler-resolution steps cannot (the v1.0.0 packaging bug).
+      - run: npm run check:dist
+
+      - run: npm run size
+
+      - name: Publish to npm with Sigstore provenance
+        run: npm publish --provenance --access public
+
+      - name: Verify provenance attestation
+        run: npm audit signatures

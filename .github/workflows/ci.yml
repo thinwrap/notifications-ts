@@ -1,0 +1,229 @@
+# .github/workflows/ci.yml
+#
+# CI matrix: Linux/macOS/Windows x Node 18/20/22.
+#
+# Three jobs:
+#   - test:                     9-cell OS x Node matrix; lint + typecheck + test + build
+#   - network-disabled-smoke:   install + build + test with outbound network blocked
+#   - bundle-size:              Tier A <=15 KB / Tier B <=30 KB (report-only at PR)
+#   - harmonization-audit:      TS <-> PHP parity report (report-only at v1.0)
+#
+# The reusable-workflow consumers (`uses: thinwrap/.github/...`) reference SHAs.
+# The shared workflows do not yet exist; the `uses:` lines are commented out
+# with `# pin: <name> @ <TBD-once-published>` placeholders. When the shared
+# workflows ship, swap the placeholder for the real SHA.
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test (${{ matrix.os }}, node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        node: [18, 20, 22]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      # --no-audit/--no-fund skip the extra registry calls; the fetch flags
+      # cap npm's very patient defaults (5-min fetch-timeout x retries) so a
+      # stalled registry connection fails the step in minutes, not hours.
+      - run: npm ci --no-audit --no-fund --fetch-timeout=60000 --fetch-retries=3 --fetch-retry-maxtimeout=15000
+        timeout-minutes: 8
+
+      - run: npm run typecheck
+
+      - name: Tests (with coverage on canonical cell)
+        run: |
+          if [ "${{ matrix.os }}" = "ubuntu-latest" ] && [ "${{ matrix.node }}" = "22" ]; then
+            npm run test:coverage
+          else
+            npm test
+          fi
+        shell: bash
+
+      - run: npm run lint
+
+      - run: npm run lint:frontmatter
+
+      - run: npm run build
+
+      # Import-smoke the built output with plain Node (CJS require + ESM
+      # import). Bundler-based steps tolerate extensionless specifiers that
+      # Node's ESM loader rejects — this is the gate that catches a broken
+      # dist/esm emit (the v1.0.0 packaging bug).
+      - run: npm run check:dist
+
+      - name: Upload coverage
+        if: matrix.os == 'ubuntu-latest' && matrix.node == '22' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage/
+          if-no-files-found: ignore
+
+  network-disabled-smoke:
+    name: network-disabled smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # When the reusable workflow ships, prefer:
+    # uses: thinwrap/.github/.github/workflows/network-disabled-smoke.yml@<sha>
+    # pin: network-disabled-smoke.yml @ <TBD-once-published>
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci --no-audit --no-fund --fetch-timeout=60000 --fetch-retries=3 --fetch-retry-maxtimeout=15000
+        timeout-minutes: 8
+
+      # Run the full offline gate inside a network NAMESPACE (`unshare -n`):
+      # the namespace has no interface except an isolated loopback, so no
+      # egress is possible at any privilege level — a stronger guarantee than
+      # firewall rules. Crucially, the Actions runner agent lives OUTSIDE the
+      # namespace and keeps streaming logs/heartbeats. (The previous
+      # iptables-based approach REJECTed all non-root egress, which also
+      # killed the runner agent itself — it runs as the same non-root
+      # `runner` user — so the job went dark and hung until GitHub declared
+      # the runner lost. Do not reintroduce host-wide firewall rules here.)
+      - name: Offline gate — typecheck, test, lint, frontmatter, build (no egress)
+        timeout-minutes: 12
+        run: |
+          sudo env "PATH=$PATH" "HOME=$HOME" unshare -n bash -e -c '
+            ip link set lo up
+            npm run typecheck
+            npm test
+            npm run lint
+            npm run lint:frontmatter
+            npm run build
+            npm run check:dist
+          '
+
+      - name: Prove the namespace actually blocks egress
+        # Self-test of the gate itself: the same namespace must FAIL a real
+        # network call. Guards against unshare silently degrading.
+        run: |
+          if sudo unshare -n curl -s --max-time 5 https://registry.npmjs.org/ > /dev/null 2>&1; then
+            echo "::error::Network namespace did not block egress — offline gate is not actually offline."
+            exit 1
+          fi
+          echo "OK — egress blocked inside the namespace."
+
+  bundle-size:
+    name: bundle size tiers
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # When the reusable workflow ships:
+    # uses: thinwrap/.github/.github/workflows/bundle-size-tier-check.yml@<sha>
+    # pin: bundle-size-tier-check.yml @ <TBD-once-published>
+    # with:
+    #   tier_a_max_kb: 15
+    #   tier_b_max_kb: 30
+    #   tier_b_providers: 'fcm,apns,ses,sns'
+    #
+    # Until then, this inline job runs `npm run size` (size-limit) +
+    # `npm run check:tree-shaking` (esbuild spot-check) against the per-
+    # connector tier ceilings declared in `.size-limit.json`. The ~3 min
+    # CI cost on doc-only PRs is preferable to the prior path-filter bug
+    # (`changed_files` is an integer, not an array — see review C2).
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci --no-audit --no-fund --fetch-timeout=60000 --fetch-retries=3 --fetch-retry-maxtimeout=15000
+        timeout-minutes: 8
+
+      - run: npm run build
+
+      - name: Bundle-size tier-gate
+        run: npm run size
+
+      - name: Tree-shaking spot-check
+        run: npm run check:tree-shaking
+
+  audit-freshness:
+    name: audit freshness (baseline-coverage + harmonization ≤14 days)
+    runs-on: ubuntu-latest
+    # Release freshness check for both audits.
+    # When the reusable workflow at thinwrap/.github/.github/workflows/
+    # harmonization-audit.yml ships, this job swaps to:
+    #   uses: thinwrap/.github/.github/workflows/harmonization-audit.yml@<sha>
+    # Until then, the inline shell check enforces:
+    #   - at least one audits/harmonization-*.md exists and is dated ≤14 days ago.
+    #   - at least one audits/baseline-coverage-*.md exists and is dated ≤14 days ago.
+    #   - each audit's decision line reads `PASS`.
+    # Triggered on every PR + push; doc-only PRs still fly through quickly.
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Baseline-coverage audit freshness
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          audits=(audits/baseline-coverage-*.md)
+          if [ "${#audits[@]}" -eq 0 ]; then
+            echo "::error::No baseline-coverage audit found in audits/. A current audit is required at release."
+            exit 1
+          fi
+          NEWEST="$(ls audits/baseline-coverage-*.md | sort | tail -1)"
+          AUDIT_DATE="$(basename "$NEWEST" | sed -E 's/baseline-coverage-(.+)\.md/\1/')"
+          AUDIT_EPOCH="$(date -d "$AUDIT_DATE" +%s 2>/dev/null || python3 -c "import datetime; print(int(datetime.datetime.fromisoformat('$AUDIT_DATE').timestamp()))")"
+          NOW_EPOCH="$(date +%s)"
+          AGE_DAYS=$(( (NOW_EPOCH - AUDIT_EPOCH) / 86400 ))
+          echo "Newest baseline-coverage audit: $NEWEST (dated $AUDIT_DATE, ${AGE_DAYS} days old)"
+          if [ "$AGE_DAYS" -gt 14 ]; then
+            echo "::error::Audit is ${AGE_DAYS} days old; max 14. Re-run baseline-coverage audit before release."
+            exit 1
+          fi
+          if ! grep -qE '^(##\s+)?Release-Gate Decision' "$NEWEST"; then
+            echo "::error::Audit $NEWEST missing the 'Release-Gate Decision' section."
+            exit 1
+          fi
+
+      - name: Harmonization audit freshness
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          audits=(audits/harmonization-*.md)
+          if [ "${#audits[@]}" -eq 0 ]; then
+            echo "::error::No harmonization audit found in audits/. A current audit is required at release."
+            exit 1
+          fi
+          NEWEST="$(ls audits/harmonization-*.md | sort | tail -1)"
+          AUDIT_DATE="$(basename "$NEWEST" | sed -E 's/harmonization-(.+)\.md/\1/')"
+          AUDIT_EPOCH="$(date -d "$AUDIT_DATE" +%s 2>/dev/null || python3 -c "import datetime; print(int(datetime.datetime.fromisoformat('$AUDIT_DATE').timestamp()))")"
+          NOW_EPOCH="$(date +%s)"
+          AGE_DAYS=$(( (NOW_EPOCH - AUDIT_EPOCH) / 86400 ))
+          echo "Newest harmonization audit: $NEWEST (dated $AUDIT_DATE, ${AGE_DAYS} days old)"
+          if [ "$AGE_DAYS" -gt 14 ]; then
+            echo "::error::Audit is ${AGE_DAYS} days old; max 14. Refresh harmonization audit before release."
+            exit 1
+          fi
+          if ! grep -qE 'Release-Gate Decision' "$NEWEST"; then
+            echo "::error::Audit $NEWEST missing the 'Release-Gate Decision' section."
+            exit 1
+          fi

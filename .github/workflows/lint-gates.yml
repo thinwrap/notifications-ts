@@ -1,0 +1,113 @@
+# .github/workflows/lint-gates.yml
+#
+# Consumes four reusable workflows from `thinwrap/.github` at SHA pins:
+#   - readme-lint.yml
+#   - license-check.yml
+#   - no-lifecycle-scripts.yml
+#   - per-connector-readme-frontmatter.yml
+#
+# The shared workflows do not yet exist. The `uses:` lines are placeholders
+# captured as comments; when the shared workflows ship, swap each placeholder
+# for the real SHA pin per the convention: `# pin: <name> @ <date> <sha-short>`.
+#
+# Until the shared workflows ship, the local equivalents run inline so the gate
+# is enforced today:
+#   - per-connector-readme-frontmatter is enforced via `node scripts/validate-frontmatter.mjs`
+#     (dependency-free; schema at `schemas/connector-readme-schema.yaml`).
+#   - license-check is enforced by spot-check (LICENSE present + MIT).
+#   - no-lifecycle-scripts is enforced by spot-check (package.json scripts allowlist).
+#   - readme-lint is best-effort markdown structure check.
+
+name: Lint Gates
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  # When the reusable workflow ships:
+  # readme-lint:
+  #   uses: thinwrap/.github/.github/workflows/readme-lint.yml@<sha>
+  #   # pin: readme-lint.yml @ <TBD-once-published>
+  #   with:
+  #     package_readme: README.md
+  #     ai_triplet_dir: .ai
+  #     stub_redirects: |
+  #       AGENTS.md
+  #       CLAUDE.md
+  #       GEMINI.md
+  readme-lint:
+    name: readme lint (inline placeholder)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify README + .ai triplet + stubs exist
+        run: |
+          set -e
+          test -f README.md
+          test -f .ai/guidelines.md
+          test -f .ai/ARCHITECTURE.md
+          test -f .ai/CONVENTIONS.md
+          test -f AGENTS.md
+          test -f CLAUDE.md
+          test -f GEMINI.md
+
+  # When the reusable workflow ships:
+  # license-check:
+  #   uses: thinwrap/.github/.github/workflows/license-check.yml@<sha>
+  #   # pin: license-check.yml @ <TBD-once-published>
+  #   with:
+  #     expected_license: MIT
+  license-check:
+    name: license check (inline placeholder)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify MIT license in package.json + LICENSE present
+        run: |
+          set -e
+          test -f LICENSE
+          node -e "process.exit(require('./package.json').license === 'MIT' ? 0 : 1)"
+
+  # When the reusable workflow ships:
+  # no-lifecycle-scripts:
+  #   uses: thinwrap/.github/.github/workflows/no-lifecycle-scripts.yml@<sha>
+  #   # pin: no-lifecycle-scripts.yml @ <TBD-once-published>
+  no-lifecycle-scripts:
+    name: no lifecycle scripts (inline placeholder)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify no preinstall/postinstall/prepublish scripts
+        run: |
+          set -e
+          node -e "
+            const s = require('./package.json').scripts || {};
+            const forbidden = ['preinstall', 'install', 'postinstall', 'prepublish', 'prepare', 'prepublishOnly', 'prepack', 'postpack'];
+            const found = forbidden.filter(k => s[k]);
+            if (found.length) {
+              console.error('Forbidden lifecycle scripts present:', found);
+              process.exit(1);
+            }
+          "
+
+  # When the reusable workflow ships:
+  # per-connector-readme-frontmatter:
+  #   uses: thinwrap/.github/.github/workflows/per-connector-readme-frontmatter.yml@<sha>
+  #   # pin: per-connector-readme-frontmatter.yml @ <TBD-once-published>
+  #   with:
+  #     schema: schemas/connector-readme-schema.yaml
+  #     globs: 'src/providers/*/README.md'
+  #     expected_count: 35
+  per-connector-readme-frontmatter:
+    name: per-connector README frontmatter
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      # validate-frontmatter.mjs is dependency-free — no npm ci needed.
+      - run: node scripts/validate-frontmatter.mjs
