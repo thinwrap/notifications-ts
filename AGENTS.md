@@ -1,3 +1,5 @@
-# See .ai/guidelines.md
+# Contributor guide — @thinwrap/notifications
 
-The single source of truth for AI agents working with `@thinwrap/notifications` is [.ai/guidelines.md](./.ai/guidelines.md).
+You're working in this library's own repo (not consuming it). Before changing any code,
+read and follow [`.ai/guidelines.md`](./.ai/guidelines.md) — the contributor entry point:
+architecture, conventions, and how to add a connector.

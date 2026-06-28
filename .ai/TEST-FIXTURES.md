@@ -8,8 +8,6 @@ across the connector spec files. It exists so that:
 - The per-spec assertion language is uniform across the four channels,
   which is what lets cross-language harmonization rely on the
   audit-log-matrix-shape rather than per-spec inspection.
-- The `audits/retry-after-coverage-<date>.md` matrix has a stable reference
-  for what each `OK` cell means in code.
 
 Two helpers live under `src/test-utils/`:
 

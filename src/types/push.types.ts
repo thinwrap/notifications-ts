@@ -3,7 +3,7 @@ import type { ChannelTypeEnum } from './channel.enum';
 
 /**
  * Push send input — 4-field baseline (`to`, `title`, `body`, `data`) per the
- * ≥90% baseline-coverage rule (audits/baseline-coverage-2026-06-04.md).
+ * ≥90% baseline-coverage rule.
  * Sub-baseline fields (`badge`, `sound`, `ttl`, …) live on per-provider
  * narrowed inputs (see `PushInputMap`) or flow through `_passthrough`.
  */

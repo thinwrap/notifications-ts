@@ -1,116 +1,79 @@
-# `@thinwrap/notifications` — AI agent guide
+# `@thinwrap/notifications` — contributor guide
 
-This file is the canonical entry point for AI agents producing consumer code that uses
-`@thinwrap/notifications`. For architecture details see [`./ARCHITECTURE.md`](./ARCHITECTURE.md);
-for naming and file-layout rules see [`./CONVENTIONS.md`](./CONVENTIONS.md).
+This folder (`.ai/`) is for developers — and the coding agents working alongside them — who are
+**changing this library**: adding a connector or improving the package. It is not usage
+documentation.
 
-## Install
+> **Using the package in your app?** See [`../README.md`](../README.md) and the per-connector
+> READMEs under [`../src/providers/`](../src/providers). `.ai/` is not part of the npm tarball —
+> its only audience is people working in the repo.
+
+## Map of this folder
+
+- **guidelines.md** (this file) — entry point + the "add a connector" recipe.
+- [`ARCHITECTURE.md`](./ARCHITECTURE.md) — the facade → dispatch → base model and the invariants every change must hold.
+- [`CONVENTIONS.md`](./CONVENTIONS.md) — file layout, naming, TypeScript/build config, the per-connector README frontmatter.
+- [`TEST-FIXTURES.md`](./TEST-FIXTURES.md) — shared spec fixtures (`Retry-After`, `TokenCacheHook`).
+
+## The shape in one sentence
+
+A consumer constructs a channel facade by provider id (`new Email('sendgrid', cfg)`); the facade
+dispatches to a connector class under `src/providers/<id>/` that extends `BaseConnector`, which
+centralizes `fetch` + JSON parsing + error mapping. No global middleware — vendor specifics stay
+local to the connector.
+
+## Setup & verify
 
 ```bash
-npm install @thinwrap/notifications
+npm install
+npm run typecheck && npm test
 ```
 
-Node ≥18 (uses native `fetch`). No vendor SDKs.
+Node ≥18 (native `fetch`). **Zero runtime dependencies — do not add any** (SigV4 for SES/SNS is
+hand-rolled on `node:crypto`).
 
-## Facade construction per channel
+## Add a connector
 
-One pattern per channel — `new Channel(<providerId>, config)`. Every connector exposes
-`connector.id` (the provider-ID string) for runtime introspection.
+Copy an existing connector as your template — [`src/providers/sendgrid/`](../src/providers/sendgrid)
+for a plain API-key email connector, [`src/providers/fcm/`](../src/providers/fcm) when token signing
+is involved. Touch-points, in order:
 
-```typescript
-import { Email, Sms, Push, Chat } from '@thinwrap/notifications';
+1. **Register the id** — add the case to the channel enum in [`src/types/provider-id.enum.ts`](../src/types/provider-id.enum.ts). A compile-time assertion keeps the enum in sync; `typecheck` fails if it drifts.
+2. **Wire the config map** — add `'<id>': <Name>Config` to [`src/types/config-map.type.ts`](../src/types/config-map.type.ts) and add the id to that channel's provider union.
+3. **Narrow input only if needed** — if the provider exposes fields the base channel input doesn't, add the mapping to [`src/types/input-map.type.ts`](../src/types/input-map.type.ts). Otherwise skip it (see the ≥90% rule below).
+4. **Create `src/providers/<id>/`**:
+   - `<id>.config.ts` — `<Name>Config` interface (auth fields first, optional `fetch?`).
+   - `<id>.connector.ts` — class `extends BaseConnector`, `readonly id`, `send(...)`, private `mapVendorError(...)`.
+   - `<id>.connector.spec.ts` — vitest; inject a `vi.fn()` fetch mock (see CONVENTIONS / TEST-FIXTURES).
+   - `<id>.types.ts` — only when narrowing.
+   - `<id>.auth.ts` — only for non-trivial token lifecycle (FCM, APNs).
+   - `index.ts` — barrel re-export.
+   - `README.md` — YAML frontmatter (schema: [`../schemas/connector-readme-schema.yaml`](../schemas/connector-readme-schema.yaml)) + body. **This** is the connector's consumer doc.
+5. **Dispatch** — add the case to `src/facades/<channel>.facade.ts`.
+6. **Export** — re-export the connector + config from [`src/index.ts`](../src/index.ts), the only public surface.
+7. **Budget** — register the connector in the bundle-size budget so `npm run size` covers it.
 
-const email = new Email('sendgrid', { apiKey: process.env.SENDGRID_KEY!, from: 'noreply@example.com' });
-const sms   = new Sms('twilio',   { accountSid: 'AC…', authToken: '…', from: '+14155550100' });
-const push  = new Push('fcm',     { projectId: 'p', clientEmail: 'sa@p.iam.gserviceaccount.com', privateKey: '-----BEGIN PRIVATE KEY-----…' });
-const chat  = new Chat('slack',   { webhookUrl: 'https://hooks.slack.com/services/T/B/X' });
+### Definition of done (the CI gates)
+
+```bash
+npm run typecheck        # strict; enum / config-map sync
+npm test                 # vitest — single file: npx vitest src/providers/<id>/<id>.connector.spec.ts
+npm run lint
+npm run lint:frontmatter # validates every connector README against the schema
+npm run build && npm run check:dist   # dual CJS/ESM emit + import smoke
+npm run size             # per-connector gzip budget
 ```
 
-Provider-ID string literals are fully typed (typos fail to compile). Prefer-enum codebases
-can use the equivalent `EmailProviderIdEnum` / `SmsProviderIdEnum` / `PushProviderIdEnum` /
-`ChatProviderIdEnum` exports interchangeably — `new Email(EmailProviderIdEnum.Sendgrid, …)`.
-Enum values are compile-time-asserted to stay in sync with the provider-ID unions.
+CI runs these across a Node 18/20/22 × Linux/macOS/Windows matrix, plus an offline (network-disabled)
+import smoke that proves zero import-time egress.
 
-## Switching providers
+## Invariants you must not break
 
-Swap the provider ID; the input shape passed to `.send(...)` does not change.
+Full reasoning lives in [`ARCHITECTURE.md`](./ARCHITECTURE.md); the short list:
 
-```typescript
-const a = new Email('sendgrid', { apiKey, from });
-const b = new Email('postmark', { serverToken, from });
-// .send({ to, subject, html }) is identical for both
-```
-
-## BYO `fetch`
-
-Inject any fetch-compatible function. The wrapper holds no state — no token cache, no
-connection pool, no retry buffer (the wrapper holds no state). FCM and APNs
-sign tokens fresh on every `.send()` by default; supply optional `tokenCache?: TokenCacheHook`
-in config to amortize signing cost (see [`../src/providers/fcm/README.md`](../src/providers/fcm/README.md)
-and [`../src/providers/apns/README.md`](../src/providers/apns/README.md)).
-
-```typescript
-import undici from 'undici';
-const email = new Email('sendgrid', { apiKey, from, fetch: undici.fetch });
-```
-
-## `_passthrough` escape valve
-
-Forward arbitrary vendor-specific fields without casing transformation.
-
-```typescript
-await email.send({
-  to: 'user@example.com', subject: 'Hi', html: '<p>Hi</p>',
-  _passthrough: { body: { dynamic_template_data: { name: 'Alice' } } },
-});
-```
-
-## Error handling
-
-One class, one switch. The wrapper performs no automatic retry — compose your own from
-`providerCode` and `e.cause` (which carries the raw `Retry-After` header when present).
-
-```typescript
-import { ConnectorError } from '@thinwrap/notifications';
-
-try {
-  await email.send(input);
-} catch (e) {
-  if (e instanceof ConnectorError) {
-    switch (e.providerCode) {
-      case 'rate_limited':        /* respect Retry-After in e.cause */ break;
-      case 'auth_failed':         /* rotate credentials              */ break;
-      case 'invalid_request':     /* fix payload                     */ break;
-      case 'invalid_recipient':   /* clean address                   */ break;
-      case 'provider_unavailable':/* transient 5xx — your retry      */ break;
-      case 'unknown':             /* fallback                        */ break;
-    }
-  } else throw e;
-}
-```
-
-`ProviderCode` is the union `'rate_limited' | 'auth_failed' | 'invalid_request' | 'invalid_recipient' | 'provider_unavailable' | 'unknown'`.
-
-## Novu drop-in (TypeScript only)
-
-The per-channel facades and the connectors they dispatch to are shape-compatible with Novu's
-`IEmailProvider` / `ISmsProvider` / `IPushProvider` / `IChatProvider`. See the channel-input
-table below for the per-channel input shape; per-provider augmentations live in each
-connector's README.
-
-## Per-channel input shape — navigation index
-
-This table is a navigation aid, not a comparison matrix. Provider-specific fields
-(`cc`, `bcc`, `categories`, regional endpoints, attachment encoding, error mappings) live
-in per-connector READMEs.
-
-| Channel | See per-connector README (example) |
-|---|---|
-| Email | [`sendgrid`](../src/providers/sendgrid/README.md) |
-| SMS   | [`twilio`](../src/providers/twilio/README.md) |
-| Push  | [`fcm`](../src/providers/fcm/README.md) |
-| Chat  | [`slack`](../src/providers/slack/README.md) |
-
-See [`./ARCHITECTURE.md`](./ARCHITECTURE.md) ("Why facade + dispatch + base") for the
-dispatch model and [`./CONVENTIONS.md`](./CONVENTIONS.md) ("Where files live in this repo")
-for the directory layout.
+- **Zero runtime deps / no vendor SDKs.** The bundle budgets depend on it.
+- **Stateless wrapper.** No caching, retries, idempotency keys, or telemetry inside the wrapper. FCM/APNs sign fresh unless the consumer passes a `tokenCache` hook.
+- **≥90% baseline-coverage rule.** A field belongs on the base channel input only if ≥90% of that channel's providers support it; everything else goes to `_passthrough` (input) / `raw` (output) or a narrowed type. Don't widen the facade for one vendor.
+- **Per-connector locality.** `mapVendorError`, casing transforms, and any wire-layer outlier translation live inside `src/providers/<id>/` — never in `BaseConnector`.
+- **Six `ProviderCode` values**, surfaced via `ConnectorError`; the raw `Retry-After` rides in `e.cause`.
+- **Pinned `vite ^6` / `vitest ^3` — do not bump** (Node 18 floor).

@@ -49,6 +49,14 @@ const mailgun = new Email('mailgun', {
 await mailgun.send({ to: 'user@example.com', subject: 'Hi', text: 'It works.' });
 ```
 
+## Provider IDs
+
+Provider IDs are typed string literals — typos fail to compile. Prefer-enum codebases can use the
+equivalent `EmailProviderIdEnum` / `SmsProviderIdEnum` / `PushProviderIdEnum` / `ChatProviderIdEnum`
+exports interchangeably (`new Email(EmailProviderIdEnum.Sendgrid, …)`). Each connector also exposes
+`connector.id` for runtime introspection. Per-channel construction and the config shape each provider
+takes are documented in its [per-connector README](#per-connector-documentation).
+
 ## Bring your own `fetch`
 
 ```typescript
@@ -166,6 +174,19 @@ matching the built-in connectors.
 - Server-only. Browser support is not in v1.0 — most providers require server-only
   secrets.
 
+## Public API surface (locked at v1.0)
+
+| Category | Exports |
+|---|---|
+| Facades | `Email`, `Sms`, `Push`, `Chat` |
+| Errors | `ConnectorError`, type `ProviderCode` |
+| Provider-ID + channel enums | `EmailProviderIdEnum`, `SmsProviderIdEnum`, `PushProviderIdEnum`, `ChatProviderIdEnum`, `ChannelTypeEnum` |
+| Status enums | `EmailEventStatusEnum`, `SmsEventStatusEnum`, `PushEventStatusEnum`, `CheckIntegrationResponseEnum` |
+| Connector interfaces (BYO) | `IEmailConnector`, `ISmsConnector`, `IPushConnector`, `IChatConnector` |
+| Input / result types | `EmailSendInput`/`EmailSendResult`, `SmsSendInput`/`SmsSendResult`, `PushSendInput`/`PushSendResult`, `ChatSendInput`/`ChatSendResult`, `EmailAttachment`, `TokenCacheHook` |
+| Base + passthrough | `BaseConnector`, `CasingEnum`, `transformKeys`, `mergePassthrough`; types `ProviderConfigMap`, `EmailProvider`, `SmsProvider`, `PushProvider`, `ChatProvider` |
+| Connectors & config types | one `<Provider><Channel>Connector` class + `<Provider>Config` per provider — see the index below |
+
 ## Per-connector documentation
 
 Each per-connector README documents auth method, regional/sandbox endpoints, narrowed
@@ -271,7 +292,7 @@ to one line per send. Error handling and retry composition stay yours.
 
 ## For AI agents and contributors
 
-- [`.ai/guidelines.md`](.ai/guidelines.md) — usage contract.
+- [`.ai/guidelines.md`](.ai/guidelines.md) — contributor entry point: how to add a connector.
 - [`.ai/ARCHITECTURE.md`](.ai/ARCHITECTURE.md) — facade-dispatch-base pattern.
 - [`.ai/CONVENTIONS.md`](.ai/CONVENTIONS.md) — naming, file layout, test patterns.
 

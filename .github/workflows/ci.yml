@@ -6,12 +6,9 @@
 #   - test:                     9-cell OS x Node matrix; lint + typecheck + test + build
 #   - network-disabled-smoke:   install + build + test with outbound network blocked
 #   - bundle-size:              Tier A <=15 KB / Tier B <=30 KB (report-only at PR)
-#   - harmonization-audit:      TS <-> PHP parity report (report-only at v1.0)
 #
-# The reusable-workflow consumers (`uses: thinwrap/.github/...`) reference SHAs.
-# The shared workflows do not yet exist; the `uses:` lines are commented out
-# with `# pin: <name> @ <TBD-once-published>` placeholders. When the shared
-# workflows ship, swap the placeholder for the real SHA.
+# Self-contained: no external reusable workflows. Cross-language TS<->PHP parity
+# is a nice-to-have, not a CI gate.
 
 name: CI
 
@@ -35,9 +32,9 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
         node: [18, 20, 22]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: ${{ matrix.node }}
           cache: npm
@@ -73,7 +70,7 @@ jobs:
 
       - name: Upload coverage
         if: matrix.os == 'ubuntu-latest' && matrix.node == '22' && always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage
           path: coverage/
@@ -83,13 +80,10 @@ jobs:
     name: network-disabled smoke
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    # When the reusable workflow ships, prefer:
-    # uses: thinwrap/.github/.github/workflows/network-disabled-smoke.yml@<sha>
-    # pin: network-disabled-smoke.yml @ <TBD-once-published>
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: '22'
           cache: npm
@@ -133,23 +127,12 @@ jobs:
     name: bundle size tiers
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    # When the reusable workflow ships:
-    # uses: thinwrap/.github/.github/workflows/bundle-size-tier-check.yml@<sha>
-    # pin: bundle-size-tier-check.yml @ <TBD-once-published>
-    # with:
-    #   tier_a_max_kb: 15
-    #   tier_b_max_kb: 30
-    #   tier_b_providers: 'fcm,apns,ses,sns'
-    #
-    # Until then, this inline job runs `npm run size` (size-limit) +
-    # `npm run check:tree-shaking` (esbuild spot-check) against the per-
-    # connector tier ceilings declared in `.size-limit.json`. The ~3 min
-    # CI cost on doc-only PRs is preferable to the prior path-filter bug
-    # (`changed_files` is an integer, not an array — see review C2).
+    # Self-contained: runs `npm run size` (size-limit) + `npm run check:tree-shaking`
+    # (esbuild spot-check) against the per-connector tier ceilings in `.size-limit.json`.
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: '22'
           cache: npm
@@ -164,66 +147,3 @@ jobs:
 
       - name: Tree-shaking spot-check
         run: npm run check:tree-shaking
-
-  audit-freshness:
-    name: audit freshness (baseline-coverage + harmonization ≤14 days)
-    runs-on: ubuntu-latest
-    # Release freshness check for both audits.
-    # When the reusable workflow at thinwrap/.github/.github/workflows/
-    # harmonization-audit.yml ships, this job swaps to:
-    #   uses: thinwrap/.github/.github/workflows/harmonization-audit.yml@<sha>
-    # Until then, the inline shell check enforces:
-    #   - at least one audits/harmonization-*.md exists and is dated ≤14 days ago.
-    #   - at least one audits/baseline-coverage-*.md exists and is dated ≤14 days ago.
-    #   - each audit's decision line reads `PASS`.
-    # Triggered on every PR + push; doc-only PRs still fly through quickly.
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Baseline-coverage audit freshness
-        run: |
-          set -euo pipefail
-          shopt -s nullglob
-          audits=(audits/baseline-coverage-*.md)
-          if [ "${#audits[@]}" -eq 0 ]; then
-            echo "::error::No baseline-coverage audit found in audits/. A current audit is required at release."
-            exit 1
-          fi
-          NEWEST="$(ls audits/baseline-coverage-*.md | sort | tail -1)"
-          AUDIT_DATE="$(basename "$NEWEST" | sed -E 's/baseline-coverage-(.+)\.md/\1/')"
-          AUDIT_EPOCH="$(date -d "$AUDIT_DATE" +%s 2>/dev/null || python3 -c "import datetime; print(int(datetime.datetime.fromisoformat('$AUDIT_DATE').timestamp()))")"
-          NOW_EPOCH="$(date +%s)"
-          AGE_DAYS=$(( (NOW_EPOCH - AUDIT_EPOCH) / 86400 ))
-          echo "Newest baseline-coverage audit: $NEWEST (dated $AUDIT_DATE, ${AGE_DAYS} days old)"
-          if [ "$AGE_DAYS" -gt 14 ]; then
-            echo "::error::Audit is ${AGE_DAYS} days old; max 14. Re-run baseline-coverage audit before release."
-            exit 1
-          fi
-          if ! grep -qE '^(##\s+)?Release-Gate Decision' "$NEWEST"; then
-            echo "::error::Audit $NEWEST missing the 'Release-Gate Decision' section."
-            exit 1
-          fi
-
-      - name: Harmonization audit freshness
-        run: |
-          set -euo pipefail
-          shopt -s nullglob
-          audits=(audits/harmonization-*.md)
-          if [ "${#audits[@]}" -eq 0 ]; then
-            echo "::error::No harmonization audit found in audits/. A current audit is required at release."
-            exit 1
-          fi
-          NEWEST="$(ls audits/harmonization-*.md | sort | tail -1)"
-          AUDIT_DATE="$(basename "$NEWEST" | sed -E 's/harmonization-(.+)\.md/\1/')"
-          AUDIT_EPOCH="$(date -d "$AUDIT_DATE" +%s 2>/dev/null || python3 -c "import datetime; print(int(datetime.datetime.fromisoformat('$AUDIT_DATE').timestamp()))")"
-          NOW_EPOCH="$(date +%s)"
-          AGE_DAYS=$(( (NOW_EPOCH - AUDIT_EPOCH) / 86400 ))
-          echo "Newest harmonization audit: $NEWEST (dated $AUDIT_DATE, ${AGE_DAYS} days old)"
-          if [ "$AGE_DAYS" -gt 14 ]; then
-            echo "::error::Audit is ${AGE_DAYS} days old; max 14. Refresh harmonization audit before release."
-            exit 1
-          fi
-          if ! grep -qE 'Release-Gate Decision' "$NEWEST"; then
-            echo "::error::Audit $NEWEST missing the 'Release-Gate Decision' section."
-            exit 1
-          fi

@@ -74,8 +74,7 @@ across Email / SMS / Push / Chat.
 The unified facade surface includes only features ≥90% of providers
 natively support in their primary send API. Sub-baseline fields are
 accessible via provider-id-narrowed augmented input types and the
-`_passthrough` escape hatch. The full tabulation lives in
-[`audits/`](audits/). Refreshing the audit is part of every release.
+`_passthrough` escape hatch.
 
 ### Migration
 
@@ -89,7 +88,6 @@ the recipe for moving off `@novu/providers`.
 
 Companion package `thinwrap/notifications` publishes simultaneously on
 Packagist with the same facade names, error model, result shapes, and
-35 provider IDs. Deliberate cross-language divergences are documented in
-[`audits/`](audits/).
+35 provider IDs.
 
 [1.0.2]: https://github.com/thinwrap/notifications-ts/releases/tag/v1.0.2

@@ -33,9 +33,7 @@ The normalized facade input/output shape
 includes only features ≥90% of providers in that channel natively support. Sub-90%
 features go to `_passthrough` (input) or `raw` (output). Concretely: `subject` is on
 the email facade because every email vendor supports it; SendGrid `categories` is not,
-because most don't — that goes through `_passthrough.body.categories`. See
-[`../audits/baseline-coverage-2026-06-04.md`](../audits/baseline-coverage-2026-06-04.md)
-for the v1.0 baseline tabulation.
+because most don't — that goes through `_passthrough.body.categories`.
 
 ## Architectural-outlier exception
 
@@ -71,6 +69,6 @@ No retries, no idempotency-key generation, no in-wrapper telemetry.
 
 ## Cross-reference
 
-- Baseline coverage v1.0 tabulation: [`../audits/baseline-coverage-2026-06-04.md`](../audits/baseline-coverage-2026-06-04.md)
 - Naming, file layout, test patterns: [`./CONVENTIONS.md`](./CONVENTIONS.md)
-- Consumer-facing usage: [`./guidelines.md`](./guidelines.md)
+- Adding a connector / contributor entry point: [`./guidelines.md`](./guidelines.md)
+- Consumer usage (install, send, error handling): [`../README.md`](../README.md)
