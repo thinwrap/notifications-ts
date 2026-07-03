@@ -18,6 +18,7 @@ import type { ProviderCode } from '../../types';
 import { mergePassthrough } from '../../utils';
 import { parseRetryAfter } from '../../utils';
 import { encodeBase64Ascii, encodeBase64Bytes } from '../../utils';
+import { stripCrlf, quoteMimeFilename } from '../../utils';
 import type { SesConfig } from './ses.config';
 import type {
   SesV2SendEmailRequest,
@@ -281,8 +282,8 @@ export class SesEmailConnector
     text: string | undefined,
     attachments: EmailAttachment[],
   ): string {
-    const boundary = `----=_Part_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-    const altBoundary = `----=_Alt_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    const boundary = `----=_Part_${randomBoundarySuffix()}`;
+    const altBoundary = `----=_Alt_${randomBoundarySuffix()}`;
 
     const lines: string[] = [];
 
@@ -332,7 +333,9 @@ export class SesEmailConnector
     lines.push('');
 
     for (const attachment of attachments) {
-      const contentType = attachment.contentType ?? 'application/octet-stream';
+      const contentType = stripCrlf(
+        attachment.contentType ?? 'application/octet-stream',
+      );
       const filename = quoteMimeFilename(attachment.filename);
 
       let encoded: string;
@@ -471,8 +474,8 @@ export class SesEmailConnector
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            ...signedHeaders,
             ...mergedHeaders,
+            ...signedHeaders,
           },
           body: serializedBody,
         }
@@ -544,8 +547,8 @@ export class SesEmailConnector
     text: string | undefined,
     attachments: IAttachmentOptions[]
   ): string {
-    const boundary = `----=_Part_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-    const altBoundary = `----=_Alt_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    const boundary = `----=_Part_${randomBoundarySuffix()}`;
+    const altBoundary = `----=_Alt_${randomBoundarySuffix()}`;
 
     const lines: string[] = [];
 
@@ -594,8 +597,9 @@ export class SesEmailConnector
 
     for (const attachment of attachments) {
       const filename = quoteMimeFilename(attachment.name ?? 'attachment');
+      const contentType = stripCrlf(attachment.mime);
       lines.push(`--${boundary}`);
-      lines.push(`Content-Type: ${attachment.mime}; name=${filename}`);
+      lines.push(`Content-Type: ${contentType}; name=${filename}`);
       lines.push('Content-Transfer-Encoding: base64');
 
       if (attachment.cid) {
@@ -760,6 +764,16 @@ function isoBasicTimestamp(): string {
 }
 
 /**
+ * Cryptographically-random suffix for MIME multipart boundaries. Uses
+ * `node:crypto` (already imported for SigV4) instead of `Math.random()` so a
+ * boundary can't be guessed/forced to collide with attacker-controlled body
+ * content.
+ */
+function randomBoundarySuffix(): string {
+  return crypto.randomBytes(12).toString('hex');
+}
+
+/**
  * Build the SigV4 canonical query string: keys sorted, each key/value RFC
  * 3986-encoded, joined `k=v&...`. Identical encoding is appended to the
  * request URL so URL and signature agree.
@@ -784,15 +798,6 @@ function rfc3986Encode(value: string): string {
 }
 
 /**
- * Strip CR/LF characters from email header values to prevent header injection.
- * MIME header field bodies cannot contain bare CR/LF; any caller-supplied
- * value that does is sanitised to spaces.
- */
-function stripCrlf(value: string): string {
-  return value.replace(/[\r\n]+/g, ' ').trim();
-}
-
-/**
  * Encode a non-ASCII header value using RFC 2047 base64 encoded-word form
  * (`=?UTF-8?B?<base64>?=`). ASCII values pass through unchanged. Always
  * CRLF-stripped (defence in depth).
@@ -805,15 +810,6 @@ function encodeHeaderValue(value: string): string {
   }
   const utf8Bytes = new TextEncoder().encode(stripped);
   return `=?UTF-8?B?${encodeBase64Bytes(utf8Bytes)}?=`;
-}
-
-/**
- * Quote a MIME filename that may contain `"` or other special characters per
- * RFC 2183. Bare filenames are quoted; embedded `"` is backslash-escaped.
- */
-function quoteMimeFilename(name: string): string {
-  const stripped = stripCrlf(name);
-  return `"${stripped.replace(/(["\\])/g, '\\$1')}"`;
 }
 
 /**

@@ -5,3 +5,4 @@ export { mergePassthrough } from './merge-passthrough';
 export type { MergedPassthrough } from './merge-passthrough';
 export { parseRetryAfter } from './retry-after';
 export { encodeBase64Ascii, encodeBase64Bytes } from './base64';
+export { stripCrlf, escapeMimeFilename, quoteMimeFilename } from './mime';

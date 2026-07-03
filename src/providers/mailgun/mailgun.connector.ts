@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { BaseConnector } from '../../base/base.connector';
 import type {
   IEmailOptions,
@@ -16,6 +17,7 @@ import type { ProviderCode } from '../../types';
 import { mergePassthrough } from '../../utils';
 import { parseRetryAfter } from '../../utils';
 import { encodeBase64Ascii } from '../../utils';
+import { stripCrlf, escapeMimeFilename } from '../../utils';
 import type { MailgunConfig } from './mailgun.config';
 import type {
   MailgunSendResponse,
@@ -326,7 +328,7 @@ export class MailgunEmailConnector
     attachments: EmailAttachment[],
     tags?: string[],
   ): { body: Buffer; boundary: string } {
-    const boundary = `----=_Part_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    const boundary = `----=_Part_${randomBoundarySuffix()}`;
     const parts: Buffer[] = [];
 
     for (const [key, value] of Object.entries(fields)) {
@@ -348,9 +350,10 @@ export class MailgunEmailConnector
     }
 
     for (const attachment of attachments) {
-      const filename = attachment.filename;
-      const contentType =
-        attachment.contentType ?? 'application/octet-stream';
+      const filename = escapeMimeFilename(attachment.filename);
+      const contentType = stripCrlf(
+        attachment.contentType ?? 'application/octet-stream',
+      );
       const fieldName = attachment.contentId ? 'inline' : 'attachment';
 
       let contentBuffer: Buffer;
@@ -387,7 +390,7 @@ export class MailgunEmailConnector
     fields: Record<string, string>,
     attachments: IAttachmentOptions[]
   ): { body: Buffer; boundary: string } {
-    const boundary = `----=_Part_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    const boundary = `----=_Part_${randomBoundarySuffix()}`;
     const parts: Buffer[] = [];
 
     for (const [key, value] of Object.entries(fields)) {
@@ -399,10 +402,11 @@ export class MailgunEmailConnector
     }
 
     for (const attachment of attachments) {
-      const name = attachment.name ?? 'attachment';
+      const name = escapeMimeFilename(attachment.name ?? 'attachment');
+      const contentType = stripCrlf(attachment.mime);
       parts.push(
         Buffer.from(
-          `--${boundary}\r\nContent-Disposition: form-data; name="attachment"; filename="${name}"\r\nContent-Type: ${attachment.mime}\r\n\r\n`
+          `--${boundary}\r\nContent-Disposition: form-data; name="attachment"; filename="${name}"\r\nContent-Type: ${contentType}\r\n\r\n`
         )
       );
       parts.push(attachment.file);
@@ -423,6 +427,15 @@ function buildQueryString(query: Record<string, string>): string {
   const keys = Object.keys(query);
   if (keys.length === 0) return '';
   return '?' + new URLSearchParams(query).toString();
+}
+
+/**
+ * Cryptographically-random suffix for multipart/form-data boundaries. Uses
+ * `node:crypto` instead of `Math.random()` so a boundary can't be
+ * guessed/forced to collide with attacker-controlled body content.
+ */
+function randomBoundarySuffix(): string {
+  return crypto.randomBytes(12).toString('hex');
 }
 
 /**

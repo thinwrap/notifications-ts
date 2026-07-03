@@ -247,8 +247,8 @@ export class SnsSmsConnector
         method: 'POST',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
-          ...signedHeaders,
           ...passthroughHeaders,
+          ...signedHeaders,
         },
         body: serializedBody,
       });

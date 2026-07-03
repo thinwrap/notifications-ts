@@ -74,7 +74,7 @@ export class ApnsPushConnector
       this.config.env === 'production'
         ? 'api.push.apple.com'
         : 'api.sandbox.push.apple.com';
-    const url = `https://${host}/3/device/${input.to}`;
+    const url = `https://${host}/3/device/${encodeURIComponent(input.to)}`;
 
     let response: Response;
     try {
@@ -342,7 +342,7 @@ export class ApnsPushConnector
 
     const results = await Promise.allSettled(
       options.target.map(async (deviceToken) => {
-        const url = `https://${host}/3/device/${deviceToken}`;
+        const url = `https://${host}/3/device/${encodeURIComponent(deviceToken)}`;
         let response: Response;
         try {
           response = await this.fetchImpl(url, {
