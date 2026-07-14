@@ -81,6 +81,12 @@ describe('SendgridEmailConnector', () => {
 
 Authoritative schema at [`../schemas/connector-readme-schema.yaml`](../schemas/connector-readme-schema.yaml).
 
+Put the frontmatter block at the **very top of the file** (opening `---` on line 1),
+with the `# Title` below the closing `---`. GitHub only renders a `---…---` block as
+(hidden) frontmatter when it leads the file; place it under the title and GitHub leaks
+the raw YAML into the page body. The validator scans past a leading title to the first
+`---`, so it will **not** catch a misplaced block — keep it on top.
+
 Required keys: `providerId`, `channel`, `auth` (with `method` + `tokenLifecycle` +
 `tokenCacheHookSupported`), `endpoint` (with `default`), `versioning` (with
 `vendorApiVersion` + `lastVerified`), `notes_passthrough`.
