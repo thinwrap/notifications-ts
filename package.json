@@ -29,6 +29,7 @@
     "access": "public"
   },
   "scripts": {
+    "prebuild": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
     "build": "npm run build:cjs && npm run build:esm && node scripts/fix-esm-imports.mjs",
     "check:dist": "node scripts/check-dist.mjs",
     "build:cjs": "tsc -p tsconfig.build.json",
