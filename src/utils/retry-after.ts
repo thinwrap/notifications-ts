@@ -3,7 +3,8 @@
  *
  * Accepts either an integer-seconds form (`"30"`) or RFC 7231 HTTP-date
  * (`"Fri, 31 Dec 1999 23:59:59 GMT"`). Returns `null` for unparseable input
- * or values in the past.
+ * (including a negative integer-seconds value); an HTTP-date in the past
+ * clamps to `0` rather than `null`.
  */
 export function parseRetryAfter(header: string | null | undefined): number | null {
   if (!header) return null;

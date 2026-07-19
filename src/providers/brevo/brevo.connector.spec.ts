@@ -210,6 +210,33 @@ describe('BrevoEmailConnector', () => {
       ]);
     });
 
+    it('encodes non-ASCII string attachment content as UTF-8 base64 (café ☕)', async () => {
+      mockFetch.mockResolvedValueOnce(brevoSuccessResponse());
+
+      const text = 'café ☕ — résumé';
+      await connector.send({
+        from: 'sender@example.com',
+        to: 'recipient@example.com',
+        subject: 'utf8 attach',
+        text: 'text body',
+        attachments: [
+          { filename: 'note.txt', contentType: 'text/plain', content: text },
+        ],
+      });
+
+      const [, init] = mockFetch.mock.calls[0]!;
+      const body = JSON.parse((init as RequestInit).body as string) as {
+        attachment: Array<Record<string, string>>;
+      };
+      expect(body.attachment[0]!.content).toBe(
+        Buffer.from(text, 'utf-8').toString('base64'),
+      );
+      // Round-trips back to the original UTF-8 text (not corrupted latin1).
+      expect(
+        Buffer.from(body.attachment[0]!.content!, 'base64').toString('utf-8'),
+      ).toBe(text);
+    });
+
     it('uses bare email sender object when senderName is not configured', async () => {
       mockFetch.mockResolvedValueOnce(brevoSuccessResponse());
       const conn = new BrevoEmailConnector({

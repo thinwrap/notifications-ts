@@ -285,6 +285,33 @@ describe('SendgridEmailConnector', () => {
       );
     });
 
+    it('encodes non-ASCII string attachment content as UTF-8 base64 (café ☕)', async () => {
+      mockFetch.mockResolvedValueOnce(sendgridSuccessResponse());
+
+      const text = 'café ☕ — résumé';
+      await connector.send({
+        from: 'sender@example.com',
+        to: 'r@example.com',
+        subject: 'utf8 attach',
+        text: 'plain',
+        attachments: [
+          { filename: 'note.txt', contentType: 'text/plain', content: text },
+        ],
+      });
+
+      const [, init] = mockFetch.mock.calls[0]!;
+      const body = JSON.parse((init as RequestInit).body as string) as {
+        attachments: Array<Record<string, string>>;
+      };
+      expect(body.attachments[0]!.content).toBe(
+        Buffer.from(text, 'utf-8').toString('base64'),
+      );
+      // Round-trips back to the original UTF-8 text (not corrupted latin1).
+      expect(
+        Buffer.from(body.attachments[0]!.content!, 'base64').toString('utf-8'),
+      ).toBe(text);
+    });
+
     it('maps tags: string[] to SendGrid categories on the wire body', async () => {
       mockFetch.mockResolvedValueOnce(sendgridSuccessResponse());
 

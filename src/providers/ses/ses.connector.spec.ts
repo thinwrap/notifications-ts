@@ -201,6 +201,76 @@ describe('SesEmailConnector', () => {
       expect(decoded).toContain(Buffer.from('hello', 'utf-8').toString('base64'));
     });
 
+    it('preserves non-ASCII body content as UTF-8 in the Raw MIME (café ☕)', async () => {
+      mockFetch.mockResolvedValueOnce(sesSuccessResponse());
+
+      // Attachments force the Raw-MIME path (the whole message is base64'd).
+      await connector.send({
+        from: 'sender@example.com',
+        to: 'r@example.com',
+        subject: 'Ünïcödé ☕',
+        html: '<p>Prix: 5€ — café ☕</p>',
+        text: 'Prix: 5€ — café ☕',
+        attachments: [
+          { filename: 'a.txt', contentType: 'text/plain', content: 'x' },
+        ],
+      });
+
+      const [, init] = mockFetch.mock.calls[0]!;
+      const body = JSON.parse((init as RequestInit).body as string) as {
+        Content: { Raw: { Data: string } };
+      };
+      const decoded = Buffer.from(body.Content.Raw.Data, 'base64').toString('utf-8');
+
+      // The é/€/☕ must survive intact (would corrupt under latin1 base64).
+      expect(decoded).toContain('Prix: 5€ — café ☕');
+      // UTF-8 text parts must be declared 8bit, never 7bit.
+      expect(decoded).toContain('Content-Type: text/plain; charset=UTF-8');
+      expect(decoded).toContain('Content-Transfer-Encoding: 8bit');
+      expect(decoded).not.toContain('Content-Transfer-Encoding: 7bit');
+    });
+
+    it('wraps attachment base64 at 76-char lines (RFC 2045/5322 conformance)', async () => {
+      mockFetch.mockResolvedValueOnce(sesSuccessResponse());
+
+      // >740 bytes: the base64 would exceed a single conformant line if unwrapped.
+      const big = Buffer.alloc(2000, 0x41);
+      await connector.send({
+        from: 'sender@example.com',
+        to: 'r@example.com',
+        subject: 'big attach',
+        text: 'body',
+        attachments: [
+          {
+            filename: 'big.bin',
+            contentType: 'application/octet-stream',
+            content: big,
+          },
+        ],
+      });
+
+      const [, init] = mockFetch.mock.calls[0]!;
+      const body = JSON.parse((init as RequestInit).body as string) as {
+        Content: { Raw: { Data: string } };
+      };
+      const decoded = Buffer.from(body.Content.Raw.Data, 'base64').toString('utf-8');
+
+      const b64 = big.toString('base64');
+      // The unwrapped single-line payload must NOT appear — it was soft-wrapped.
+      expect(decoded).not.toContain(b64);
+      // The CRLF-wrapped 76-char form must appear verbatim.
+      const wrapped = (b64.match(/.{1,76}/g) ?? []).join('\r\n');
+      expect(decoded).toContain(wrapped);
+      // Every base64 body line is <= 76 chars.
+      const b64Lines = decoded
+        .split('\r\n')
+        .filter((l) => /^[A-Za-z0-9+/]+={0,2}$/.test(l) && l.length > 20);
+      expect(b64Lines.length).toBeGreaterThan(1);
+      for (const line of b64Lines) {
+        expect(line.length).toBeLessThanOrEqual(76);
+      }
+    });
+
     it('emits Content-ID/inline disposition when attachment.contentId is set', async () => {
       mockFetch.mockResolvedValueOnce(sesSuccessResponse());
 

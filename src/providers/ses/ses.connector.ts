@@ -17,7 +17,7 @@ import { ConnectorError } from '../../types';
 import type { ProviderCode } from '../../types';
 import { mergePassthrough } from '../../utils';
 import { parseRetryAfter } from '../../utils';
-import { encodeBase64Ascii, encodeBase64Bytes } from '../../utils';
+import { encodeBase64Utf8, encodeBase64Bytes } from '../../utils';
 import { stripCrlf, quoteMimeFilename } from '../../utils';
 import type { SesConfig } from './ses.config';
 import type {
@@ -166,7 +166,7 @@ export class SesEmailConnector
       );
       content = {
         Raw: {
-          Data: encodeBase64Ascii(mimeMessage),
+          Data: encodeBase64Utf8(mimeMessage),
         },
       };
     } else {
@@ -314,7 +314,7 @@ export class SesEmailConnector
     if (text) {
       lines.push(`--${altBoundary}`);
       lines.push('Content-Type: text/plain; charset=UTF-8');
-      lines.push('Content-Transfer-Encoding: 7bit');
+      lines.push('Content-Transfer-Encoding: 8bit');
       lines.push('');
       lines.push(text);
       lines.push('');
@@ -323,7 +323,7 @@ export class SesEmailConnector
     if (html) {
       lines.push(`--${altBoundary}`);
       lines.push('Content-Type: text/html; charset=UTF-8');
-      lines.push('Content-Transfer-Encoding: 7bit');
+      lines.push('Content-Transfer-Encoding: 8bit');
       lines.push('');
       lines.push(html);
       lines.push('');
@@ -340,7 +340,7 @@ export class SesEmailConnector
 
       let encoded: string;
       if (typeof attachment.content === 'string') {
-        encoded = encodeBase64Ascii(attachment.content);
+        encoded = encodeBase64Utf8(attachment.content);
       } else {
         encoded = encodeBase64Bytes(attachment.content);
       }
@@ -357,7 +357,7 @@ export class SesEmailConnector
       }
 
       lines.push('');
-      lines.push(encoded);
+      lines.push(wrapBase64(encoded));
       lines.push('');
     }
 
@@ -409,7 +409,7 @@ export class SesEmailConnector
       );
       content = {
         Raw: {
-          Data: encodeBase64Ascii(mimeMessage),
+          Data: encodeBase64Utf8(mimeMessage),
         },
       };
     } else {
@@ -579,7 +579,7 @@ export class SesEmailConnector
     if (text) {
       lines.push(`--${altBoundary}`);
       lines.push('Content-Type: text/plain; charset=UTF-8');
-      lines.push('Content-Transfer-Encoding: 7bit');
+      lines.push('Content-Transfer-Encoding: 8bit');
       lines.push('');
       lines.push(text);
       lines.push('');
@@ -587,7 +587,7 @@ export class SesEmailConnector
 
     lines.push(`--${altBoundary}`);
     lines.push('Content-Type: text/html; charset=UTF-8');
-    lines.push('Content-Transfer-Encoding: 7bit');
+    lines.push('Content-Transfer-Encoding: 8bit');
     lines.push('');
     lines.push(html);
     lines.push('');
@@ -610,7 +610,7 @@ export class SesEmailConnector
       }
 
       lines.push('');
-      lines.push(encodeBase64Bytes(attachment.file));
+      lines.push(wrapBase64(encodeBase64Bytes(attachment.file)));
       lines.push('');
     }
 
@@ -771,6 +771,21 @@ function isoBasicTimestamp(): string {
  */
 function randomBoundarySuffix(): string {
   return crypto.randomBytes(12).toString('hex');
+}
+
+/**
+ * Soft-wrap a base64 attachment payload into CRLF-delimited 76-character
+ * lines. RFC 2045 caps base64 lines at 76 chars and RFC 5322 forbids lines
+ * longer than 998 octets; an unwrapped attachment >~740 bytes would otherwise
+ * emit a single over-long, non-conformant line. Lines are joined with CRLF so
+ * they compose correctly with the surrounding `lines.join('\r\n')`.
+ */
+function wrapBase64(encoded: string): string {
+  const chunks: string[] = [];
+  for (let i = 0; i < encoded.length; i += 76) {
+    chunks.push(encoded.slice(i, i + 76));
+  }
+  return chunks.join('\r\n');
 }
 
 /**

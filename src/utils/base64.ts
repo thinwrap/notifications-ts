@@ -9,6 +9,17 @@ export function encodeBase64Ascii(input: string): string {
   return Buffer.from(input, 'binary').toString('base64');
 }
 
+/**
+ * Base64-encode a UTF-8 TEXT string. Unlike {@link encodeBase64Ascii} (which
+ * treats each code unit as a raw byte and therefore corrupts / throws on
+ * non-ASCII), this first serializes to UTF-8 bytes so `café`/emoji survive the
+ * round-trip. Use this for any email content/MIME payload; reserve
+ * `encodeBase64Ascii` for guaranteed-ASCII credential strings (`user:pass`).
+ */
+export function encodeBase64Utf8(input: string): string {
+  return encodeBase64Bytes(new TextEncoder().encode(input));
+}
+
 export function encodeBase64Bytes(input: Uint8Array | ArrayBuffer): string {
   const bytes = input instanceof Uint8Array ? input : new Uint8Array(input);
 

@@ -13,7 +13,7 @@ import { ConnectorError } from '../../types';
 import type { ProviderCode } from '../../types';
 import { mergePassthrough } from '../../utils';
 import { parseRetryAfter } from '../../utils';
-import { encodeBase64Ascii, encodeBase64Bytes } from '../../utils';
+import { encodeBase64Utf8, encodeBase64Bytes } from '../../utils';
 import type { BrevoConfig } from './brevo.config';
 import type {
   BrevoSendResponse,
@@ -177,7 +177,7 @@ export class BrevoEmailConnector
       body.attachment = input.attachments.map((a) => {
         const contentBase64 =
           typeof a.content === 'string'
-            ? encodeBase64Ascii(a.content)
+            ? encodeBase64Utf8(a.content)
             : encodeBase64Bytes(a.content);
         // Brevo's attachment shape: { name, content }. ContentType is implicit
         // from filename per Brevo's docs; contentId is rejected at top of send().

@@ -13,7 +13,7 @@ import { ConnectorError } from '../../types';
 import type { ProviderCode } from '../../types';
 import { mergePassthrough } from '../../utils';
 import { parseRetryAfter } from '../../utils';
-import { encodeBase64Ascii, encodeBase64Bytes } from '../../utils';
+import { encodeBase64Utf8, encodeBase64Bytes } from '../../utils';
 import type { ResendConfig } from './resend.config';
 import type {
   ResendSendEmailResponse,
@@ -108,7 +108,7 @@ export class ResendEmailConnector
       body.attachments = input.attachments.map((a) => {
         const content =
           typeof a.content === 'string'
-            ? encodeBase64Ascii(a.content)
+            ? encodeBase64Utf8(a.content)
             : encodeBase64Bytes(a.content);
         const mapped: Record<string, unknown> = {
           filename: a.filename,

@@ -62,7 +62,7 @@ export function transformKeys(
 
   for (const [key, value] of Object.entries(obj)) {
     const newKey = transform(key);
-    if (value !== null && typeof value === 'object' && !Array.isArray(value) && !(value instanceof Buffer)) {
+    if (value !== null && typeof value === 'object' && !Array.isArray(value) && !(typeof Buffer !== 'undefined' && value instanceof Buffer)) {
       result[newKey] = transformKeys(value as Record<string, unknown>, casing);
     } else {
       result[newKey] = value;

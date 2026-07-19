@@ -142,6 +142,27 @@ describe('DiscordChatConnector', () => {
         expect((err as ConnectorError).message).toBe('Network failure');
       }
     });
+
+    it('redacts the (overridden) webhook URL from surfaced error messages', async () => {
+      mockFetch.mockRejectedValueOnce(
+        new Error(
+          'connect ECONNREFUSED https://discord.com/api/webhooks/789/secret-xyz',
+        ),
+      );
+
+      try {
+        await connector.sendMessage({
+          content: 'hi',
+          webhookUrl: 'https://discord.com/api/webhooks/789/secret-xyz',
+        });
+        expect.unreachable('Should have thrown');
+      } catch (err) {
+        const ce = err as ConnectorError;
+        expect(ce.message).not.toContain('789/secret-xyz');
+        expect(ce.message).not.toContain('secret-xyz');
+        expect(ce.message).toContain('<redacted>');
+      }
+    });
   });
 
   // ---------------------------------------------------------------------------
@@ -378,6 +399,27 @@ describe('DiscordChatConnector', () => {
         const ce = err as ConnectorError;
         expect(ce.providerCode).toBe('provider_unavailable');
         expect(ce.statusCode).toBeNull();
+      }
+    });
+
+    it('redacts the webhook URL (the credential) from surfaced error messages', async () => {
+      // Simulate an underlying fetch error that leaks the full webhook URL.
+      mockFetch.mockRejectedValueOnce(
+        new Error(
+          'request to https://discord.com/api/webhooks/123/abc?wait=true failed',
+        ),
+      );
+
+      try {
+        await connector.send({ body: 'hi' });
+        expect.unreachable('Should have thrown');
+      } catch (err) {
+        const ce = err as ConnectorError;
+        expect(ce.message).not.toContain(
+          'https://discord.com/api/webhooks/123/abc',
+        );
+        expect(ce.message).not.toContain('/123/abc');
+        expect(ce.message).toContain('<redacted>');
       }
     });
 

@@ -19,6 +19,19 @@ import type {
 } from './discord.types';
 
 /**
+ * Defense-in-depth: the Discord webhook URL IS the credential (its trailing
+ * path segment is the secret token). Mirroring the Telegram connector's
+ * `redactBotToken`, scrub the webhook URL from any text surfaced through error
+ * messages so an underlying fetch error can't leak it into logs or stack
+ * traces. Literal (split/join) replacement — a URL is full of regex-special
+ * characters, so this is both simpler and safer than a built RegExp.
+ */
+function redactWebhookUrl(input: string, webhookUrl: string | undefined): string {
+  if (!webhookUrl) return input;
+  return input.split(webhookUrl).join('<redacted>');
+}
+
+/**
  * Webhook-URL-as-auth. No Authorization header; the webhookUrl IS the credential.
  *
  * `?wait=true` is always appended so Discord returns the created message ID in
@@ -96,16 +109,19 @@ export class DiscordChatConnector
         body: JSON.stringify(mergedBody),
       });
     } catch (error) {
+      // redact the webhook URL (the credential) from any surfaced error text.
+      const rawMessage = (error as Error).message ?? 'Network error';
+      const safeMessage = redactWebhookUrl(rawMessage, this.config.webhookUrl);
       if ((error as Error)?.name === 'AbortError') {
         throw new ConnectorError({
-          message: (error as Error).message ?? 'Request cancelled',
+          message: safeMessage,
           statusCode: null,
           providerCode: 'invalid_request',
           cause: error,
         });
       }
       throw new ConnectorError({
-        message: (error as Error).message ?? 'Network error',
+        message: safeMessage,
         statusCode: null,
         providerCode: 'provider_unavailable',
         cause: { raw: error },
@@ -239,16 +255,19 @@ export class DiscordChatConnector
         body: JSON.stringify(body),
       });
     } catch (error) {
+      // redact the webhook URL (the credential) from any surfaced error text.
+      const rawMessage = (error as Error).message ?? 'Network error';
+      const safeMessage = redactWebhookUrl(rawMessage, webhookUrl);
       if ((error as Error)?.name === 'AbortError') {
         throw new ConnectorError({
-          message: (error as Error).message ?? 'Request cancelled',
+          message: safeMessage,
           statusCode: null,
           providerCode: 'invalid_request',
           cause: error,
         });
       }
       throw new ConnectorError({
-        message: (error as Error).message ?? 'Network error',
+        message: safeMessage,
         statusCode: null,
         providerCode: 'provider_unavailable',
         cause: { raw: error },

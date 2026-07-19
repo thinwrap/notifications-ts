@@ -14,7 +14,7 @@ import { ConnectorError } from '../../types';
 import type { ProviderCode } from '../../types';
 import { mergePassthrough } from '../../utils';
 import { parseRetryAfter } from '../../utils';
-import { encodeBase64Ascii, encodeBase64Bytes } from '../../utils';
+import { encodeBase64Utf8, encodeBase64Bytes } from '../../utils';
 import type { SendgridConfig } from './sendgrid.config';
 import type { SendgridErrorResponse } from './sendgrid.types';
 
@@ -156,7 +156,7 @@ export class SendgridEmailConnector
       body.attachments = input.attachments.map((a) => {
         const contentBase64 =
           typeof a.content === 'string'
-            ? encodeBase64Ascii(a.content)
+            ? encodeBase64Utf8(a.content)
             : encodeBase64Bytes(a.content);
         const att: Record<string, unknown> = {
           content: contentBase64,

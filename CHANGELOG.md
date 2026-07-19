@@ -7,12 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.3] — 2026-07-20
+
 ### Changed
 
 - **Per-connector READMEs** no longer carry a YAML frontmatter block — the
   metadata GitHub rendered as a table but nothing consumed. The frontmatter
   validator (`scripts/validate-frontmatter.mjs`), its schema, and the CI gate
   that ran it have been removed. Per-connector docs are now plain Markdown.
+
+### Fixed
+
+- **Non-ASCII email content** is now encoded as UTF-8. `encodeBase64Ascii`
+  encoded its input as latin1, corrupting non-ASCII text (accents, emoji, CJK)
+  in the SES raw-MIME message and in string attachments across nine email
+  connectors (Resend, SendGrid, Brevo, Postmark, Mailtrap, SparkPost,
+  MailerSend, Scaleway, SES), and threw on runtimes whose `btoa` rejects code
+  points > U+00FF. Content is now base64-encoded from UTF-8 bytes.
+- **SES raw-MIME conformance** — attachment base64 is line-wrapped at 76
+  characters (RFC 5322) and the text/plain & text/html parts declare
+  `Content-Transfer-Encoding: 8bit` (was `7bit`) over their UTF-8 bodies.
+- **Edge-runtime portability** — `transformKeys` no longer throws a
+  `ReferenceError` on runtimes without a global `Buffer`.
+
+### Security
+
+- **Discord** webhook URLs (which are the entire credential) are now redacted
+  from error output, matching the Telegram bot-token redaction.
 
 ## [1.0.2] — 2026-06-05
 
