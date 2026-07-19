@@ -1,29 +1,3 @@
----
-providerId: twilio
-channel: sms
-auth:
-  method: basic-auth
-  tokenLifecycle: static
-  tokenCacheHookSupported: false
-endpoint:
-  default: https://api.twilio.com/2010-04-01
-versioning:
-  vendorApiVersion: 2010-04-01
-  lastVerified: 2026-05-17
-notes_passthrough: |
-  Twilio accepts form-encoded fields. Forward `StatusCallback`,
-  `MessagingServiceSid`, `MaxPrice`, etc. via `_passthrough.body`. Twilio
-  Content API templates also forwarded via passthrough.
-regions:
-  - us1
-  - au1
-  - ie1
-attachments_supported: false
-templates_supported: false
-novuProviderId: twilio
-tier: 1
----
-
 # Twilio SMS Connector
 
 ## Quick install

@@ -1,24 +1,3 @@
----
-providerId: expo
-channel: push
-auth:
-  method: bearer
-  tokenLifecycle: static
-  tokenCacheHookSupported: false
-endpoint:
-  default: https://exp.host/--/api/v2/push/send
-versioning:
-  vendorApiVersion: v2
-  lastVerified: 2026-05-17
-notes_passthrough: |
-  Expo accepts `categoryId`, `channelId`, `mutableContent`, `priority`, etc.
-  Forward via `_passthrough.body`.
-attachments_supported: false
-templates_supported: false
-novuProviderId: expo
-tier: 1
----
-
 # Expo Push Connector
 
 ## Quick install

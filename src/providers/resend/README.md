@@ -1,24 +1,3 @@
----
-providerId: resend
-channel: email
-auth:
-  method: bearer
-  tokenLifecycle: static
-  tokenCacheHookSupported: false
-endpoint:
-  default: https://api.resend.com/emails
-versioning:
-  vendorApiVersion: v1
-  lastVerified: 2026-05-17
-notes_passthrough: |
-  Forward Resend fields (e.g., `react`, `scheduled_at`, `headers`) via
-  `_passthrough.body`. Use `_passthrough.headers` for `Idempotency-Key`.
-attachments_supported: true
-templates_supported: false
-novuProviderId: resend
-tier: 1
----
-
 # Resend Email Connector
 
 ## Quick install

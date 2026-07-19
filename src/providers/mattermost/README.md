@@ -1,24 +1,3 @@
----
-providerId: mattermost
-channel: chat
-auth:
-  method: webhook-url-secret
-  tokenLifecycle: static
-  tokenCacheHookSupported: false
-endpoint:
-  default: https://mattermost.example.com/hooks
-versioning:
-  vendorApiVersion: webhook-v4
-  lastVerified: 2026-05-17
-notes_passthrough: |
-  Forward Mattermost fields (`channel`, `username`, `icon_url`,
-  `attachments`, `props`) via `_passthrough.body`.
-attachments_supported: false
-templates_supported: false
-novuProviderId: mattermost
-tier: 1
----
-
 # Mattermost Chat Connector
 
 ## Quick install

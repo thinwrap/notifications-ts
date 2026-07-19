@@ -1,27 +1,3 @@
----
-providerId: sparkpost
-channel: email
-auth:
-  method: api-key-header
-  tokenLifecycle: static
-  tokenCacheHookSupported: false
-endpoint:
-  default: https://api.sparkpost.com/api/v1/transmissions
-versioning:
-  vendorApiVersion: v1
-  lastVerified: 2026-05-17
-notes_passthrough: |
-  SparkPost transmissions accept rich top-level fields (`options`,
-  `metadata`, `substitution_data`). Forward via `_passthrough.body`.
-regions:
-  - us
-  - eu
-attachments_supported: true
-templates_supported: true
-novuProviderId: sparkpost
-tier: 1
----
-
 # SparkPost Email Connector
 
 ## Quick install

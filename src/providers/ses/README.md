@@ -1,35 +1,3 @@
----
-providerId: ses
-channel: email
-auth:
-  method: aws-sigv4
-  tokenLifecycle: static
-  tokenCacheHookSupported: false
-endpoint:
-  default: https://email.us-east-1.amazonaws.com/v2/email/outbound-emails
-versioning:
-  vendorApiVersion: v2
-  lastVerified: 2026-05-17
-notes_passthrough: |
-  Forward SES v2 fields (e.g., `ConfigurationSetName`, `Tags`,
-  `FromEmailAddressIdentityArn`) via `_passthrough.body`. Keys are forwarded
-  verbatim — SES expects PascalCase top-level keys.
-regions:
-  - us-east-1
-  - us-east-2
-  - us-west-1
-  - us-west-2
-  - eu-west-1
-  - eu-central-1
-  - ap-northeast-1
-  - ap-southeast-1
-  - ap-southeast-2
-attachments_supported: true
-templates_supported: true
-novuProviderId: ses
-tier: 1
----
-
 # Amazon SES Email Connector
 
 ## Quick install

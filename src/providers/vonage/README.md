@@ -1,24 +1,3 @@
----
-providerId: vonage
-channel: sms
-auth:
-  method: api-key-query
-  tokenLifecycle: static
-  tokenCacheHookSupported: false
-endpoint:
-  default: https://rest.nexmo.com/sms/json
-versioning:
-  vendorApiVersion: v1
-  lastVerified: 2026-05-17
-notes_passthrough: |
-  Vonage accepts form-encoded fields. Forward Vonage-specific fields
-  (`callback`, `client-ref`, `message-class`, etc.) via `_passthrough.body`.
-attachments_supported: false
-templates_supported: false
-novuProviderId: nexmo
-tier: 1
----
-
 # Vonage (Nexmo) SMS Connector
 
 ## Quick install

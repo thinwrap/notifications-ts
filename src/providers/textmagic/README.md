@@ -1,24 +1,3 @@
----
-providerId: textmagic
-channel: sms
-auth:
-  method: dual-header
-  tokenLifecycle: static
-  tokenCacheHookSupported: false
-endpoint:
-  default: https://rest.textmagic.com/api/v2/messages
-versioning:
-  vendorApiVersion: v2
-  lastVerified: 2026-05-17
-notes_passthrough: |
-  Forward Textmagic fields (`sendingTime`, `cutExtra`, `partsCount`, etc.)
-  via `_passthrough.body`.
-attachments_supported: false
-templates_supported: false
-novuProviderId: null
-tier: 3
----
-
 # Textmagic SMS Connector
 
 ## Quick install

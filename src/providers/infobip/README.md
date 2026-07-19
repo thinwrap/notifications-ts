@@ -1,24 +1,3 @@
----
-providerId: infobip
-channel: sms
-auth:
-  method: api-key-header
-  tokenLifecycle: static
-  tokenCacheHookSupported: false
-endpoint:
-  default: https://example.api.infobip.com/sms/3/messages/text/advanced
-versioning:
-  vendorApiVersion: v3
-  lastVerified: 2026-05-17
-notes_passthrough: |
-  Infobip uses camelCase JSON. Forward fields (`flash`, `intermediateReport`,
-  `notifyUrl`, etc.) via `_passthrough.body`.
-attachments_supported: false
-templates_supported: false
-novuProviderId: 'infobip-sms'
-tier: 2
----
-
 # Infobip SMS Connector
 
 ## Quick install

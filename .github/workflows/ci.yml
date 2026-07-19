@@ -61,8 +61,6 @@ jobs:
 
       - run: npm run lint
 
-      - run: npm run lint:frontmatter
-
       - run: npm run build
 
       # Import-smoke the built output with plain Node (CJS require + ESM
@@ -103,7 +101,7 @@ jobs:
       # killed the runner agent itself — it runs as the same non-root
       # `runner` user — so the job went dark and hung until GitHub declared
       # the runner lost. Do not reintroduce host-wide firewall rules here.)
-      - name: Offline gate — typecheck, test, lint, frontmatter, build (no egress)
+      - name: Offline gate — typecheck, test, lint, build (no egress)
         timeout-minutes: 12
         run: |
           sudo env "PATH=$PATH" "HOME=$HOME" unshare -n bash -e -c '
@@ -111,7 +109,6 @@ jobs:
             npm run typecheck
             npm test
             npm run lint
-            npm run lint:frontmatter
             npm run build
             npm run check:dist
           '

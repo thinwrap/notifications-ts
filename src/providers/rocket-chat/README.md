@@ -1,24 +1,3 @@
----
-providerId: rocket-chat
-channel: chat
-auth:
-  method: webhook-url-secret
-  tokenLifecycle: static
-  tokenCacheHookSupported: false
-endpoint:
-  default: https://example.rocket.chat/hooks
-versioning:
-  vendorApiVersion: webhook-v1
-  lastVerified: 2026-05-17
-notes_passthrough: |
-  Forward Rocket.Chat fields (`channel`, `alias`, `emoji`, `avatar`,
-  `attachments`) via `_passthrough.body`.
-attachments_supported: false
-templates_supported: false
-novuProviderId: 'rocket-chat'
-tier: 1
----
-
 # Rocket.Chat Chat Connector
 
 ## Quick install

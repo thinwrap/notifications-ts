@@ -1,24 +1,3 @@
----
-providerId: brevo
-channel: email
-auth:
-  method: api-key-header
-  tokenLifecycle: static
-  tokenCacheHookSupported: false
-endpoint:
-  default: https://api.brevo.com/v3/smtp/email
-versioning:
-  vendorApiVersion: v3
-  lastVerified: 2026-05-17
-notes_passthrough: |
-  Brevo uses camelCase JSON. Forward `templateId`, `params`, `tags`, etc. via
-  `_passthrough.body`.
-attachments_supported: true
-templates_supported: true
-novuProviderId: sendinblue
-tier: 1
----
-
 # Brevo Email Connector
 
 ## Quick install

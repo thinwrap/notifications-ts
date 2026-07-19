@@ -1,24 +1,3 @@
----
-providerId: line
-channel: chat
-auth:
-  method: bearer
-  tokenLifecycle: static
-  tokenCacheHookSupported: false
-endpoint:
-  default: https://api.line.me/v2/bot/message/push
-versioning:
-  vendorApiVersion: v2
-  lastVerified: 2026-05-17
-notes_passthrough: |
-  Forward LINE Messaging API message objects (Flex Message, Sticker,
-  Quick Reply) via `_passthrough.body`.
-attachments_supported: false
-templates_supported: false
-novuProviderId: line
-tier: 1
----
-
 # LINE Chat Connector
 
 ## Quick install

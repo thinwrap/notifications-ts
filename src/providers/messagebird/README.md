@@ -1,24 +1,3 @@
----
-providerId: messagebird
-channel: sms
-auth:
-  method: api-key-header
-  tokenLifecycle: static
-  tokenCacheHookSupported: false
-endpoint:
-  default: https://rest.messagebird.com/messages
-versioning:
-  vendorApiVersion: v1
-  lastVerified: 2026-05-17
-notes_passthrough: |
-  Forward MessageBird fields (`reference`, `validity`, `scheduledDatetime`,
-  `gateway`, etc.) via `_passthrough.body`.
-attachments_supported: false
-templates_supported: false
-novuProviderId: messagebird
-tier: 2
----
-
 # MessageBird (Bird) SMS Connector
 
 ## Quick install

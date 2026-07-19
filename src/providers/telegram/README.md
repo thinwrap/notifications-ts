@@ -1,24 +1,3 @@
----
-providerId: telegram
-channel: chat
-auth:
-  method: bot-token-url
-  tokenLifecycle: static
-  tokenCacheHookSupported: false
-endpoint:
-  default: https://api.telegram.org
-versioning:
-  vendorApiVersion: bot-api
-  lastVerified: 2026-05-17
-notes_passthrough: |
-  Forward Telegram Bot API fields (`parse_mode`, `reply_markup`,
-  `disable_notification`, etc.) via `_passthrough.body`.
-attachments_supported: false
-templates_supported: false
-novuProviderId: null
-tier: 1
----
-
 # Telegram Chat Connector
 
 ## Quick install

@@ -1,27 +1,3 @@
----
-providerId: sinch
-channel: sms
-auth:
-  method: bearer
-  tokenLifecycle: static
-  tokenCacheHookSupported: false
-endpoint:
-  default: https://us.sms.api.sinch.com
-versioning:
-  vendorApiVersion: xms-v1
-  lastVerified: 2026-05-17
-notes_passthrough: |
-  Forward Sinch xms batch fields (`delivery_report`, `callback_url`,
-  `send_at`, etc.) via `_passthrough.body`.
-regions:
-  - us
-  - eu
-attachments_supported: false
-templates_supported: false
-novuProviderId: null
-tier: 2
----
-
 # Sinch SMS Connector
 
 ## Quick install

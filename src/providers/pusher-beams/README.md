@@ -1,24 +1,3 @@
----
-providerId: pusher-beams
-channel: push
-auth:
-  method: bearer
-  tokenLifecycle: static
-  tokenCacheHookSupported: false
-endpoint:
-  default: https://example.pushnotifications.pusher.com/publish_api/v1
-versioning:
-  vendorApiVersion: v1
-  lastVerified: 2026-05-17
-notes_passthrough: |
-  Forward Beams platform-specific payload keys (`apns`, `fcm`, `web`) via
-  `_passthrough.body`.
-attachments_supported: false
-templates_supported: false
-novuProviderId: pusher-beams
-tier: 1
----
-
 # Pusher Beams Push Connector
 
 ## Quick install

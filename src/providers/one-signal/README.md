@@ -1,24 +1,3 @@
----
-providerId: one-signal
-channel: push
-auth:
-  method: api-key-header
-  tokenLifecycle: static
-  tokenCacheHookSupported: false
-endpoint:
-  default: https://onesignal.com/api/v1/notifications
-versioning:
-  vendorApiVersion: v1
-  lastVerified: 2026-05-17
-notes_passthrough: |
-  Forward OneSignal fields (`headings`, `data`, `filters`, `template_id`,
-  `large_icon`, etc.) via `_passthrough.body`.
-attachments_supported: false
-templates_supported: true
-novuProviderId: one-signal
-tier: 1
----
-
 # OneSignal Push Connector
 
 ## Quick install

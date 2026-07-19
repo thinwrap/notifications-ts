@@ -1,24 +1,3 @@
----
-providerId: postmark
-channel: email
-auth:
-  method: api-key-header
-  tokenLifecycle: static
-  tokenCacheHookSupported: false
-endpoint:
-  default: https://api.postmarkapp.com/email
-versioning:
-  vendorApiVersion: v1
-  lastVerified: 2026-05-17
-notes_passthrough: |
-  Postmark API uses PascalCase top-level keys. Forward fields like `TemplateId`,
-  `TemplateModel`, `Metadata`, or `MessageStream` via `_passthrough.body`.
-attachments_supported: true
-templates_supported: true
-novuProviderId: postmark
-tier: 1
----
-
 # Postmark Email Connector
 
 ## Quick install

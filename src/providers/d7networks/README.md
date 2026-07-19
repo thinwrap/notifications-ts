@@ -1,24 +1,3 @@
----
-providerId: d7networks
-channel: sms
-auth:
-  method: bearer
-  tokenLifecycle: static
-  tokenCacheHookSupported: false
-endpoint:
-  default: https://api.d7networks.com/messages/v1/send
-versioning:
-  vendorApiVersion: v1
-  lastVerified: 2026-05-17
-notes_passthrough: |
-  Forward D7 fields (`tag`, `data_coding`, `schedule_time`) via
-  `_passthrough.body`.
-attachments_supported: false
-templates_supported: false
-novuProviderId: null
-tier: 3
----
-
 # D7 Networks SMS Connector
 
 ## Quick install

@@ -1,25 +1,3 @@
----
-providerId: whatsapp-business
-channel: chat
-auth:
-  method: bearer
-  tokenLifecycle: static
-  tokenCacheHookSupported: false
-endpoint:
-  default: https://graph.facebook.com
-versioning:
-  vendorApiVersion: v21.0
-  lastVerified: 2026-05-17
-notes_passthrough: |
-  Forward Cloud-API fields (`template`, `context`, `interactive`, etc.) via
-  `_passthrough.body`. Templates are required for messages outside the 24h
-  customer-service window.
-attachments_supported: true
-templates_supported: true
-novuProviderId: 'whatsapp-business'
-tier: 1
----
-
 # WhatsApp Business Chat Connector
 
 ## Quick install

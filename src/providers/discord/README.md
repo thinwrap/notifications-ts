@@ -1,24 +1,3 @@
----
-providerId: discord
-channel: chat
-auth:
-  method: webhook-url-secret
-  tokenLifecycle: static
-  tokenCacheHookSupported: false
-endpoint:
-  default: https://discord.com/api/webhooks
-versioning:
-  vendorApiVersion: v10
-  lastVerified: 2026-05-17
-notes_passthrough: |
-  Forward Discord webhook fields (`embeds`, `username`, `avatar_url`,
-  `tts`, `allowed_mentions`) via `_passthrough.body`.
-attachments_supported: false
-templates_supported: false
-novuProviderId: discord
-tier: 1
----
-
 # Discord Chat Connector
 
 ## Quick install

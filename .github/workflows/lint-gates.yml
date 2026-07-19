@@ -2,8 +2,6 @@
 #
 # Self-contained lint gates — no external reusable workflows. Each check runs
 # inline so it's enforced today:
-#   - per-connector-readme-frontmatter: `node scripts/validate-frontmatter.mjs`
-#     (dependency-free; schema at `schemas/connector-readme-schema.yaml`).
 #   - license-check: spot-check (LICENSE present + MIT in package.json).
 #   - no-lifecycle-scripts: spot-check (package.json scripts allowlist).
 #   - readme-lint: README + .ai triplet + agent-stub presence check.
@@ -63,15 +61,3 @@ jobs:
               process.exit(1);
             }
           "
-
-  per-connector-readme-frontmatter:
-    name: per-connector README frontmatter
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
-        with:
-          node-version: '22'
-      # validate-frontmatter.mjs is dependency-free — no npm ci needed.
-      - run: node scripts/validate-frontmatter.mjs

@@ -72,9 +72,7 @@ if (!result.success) { /* soft-reject handling */ }
   four facades — best-effort: it delegates to the connector when the
   connector implements it (currently SES only) and otherwise resolves
   `{ success: true }` without a network call.
-- **Provider IDs:** mostly match Novu enums. Four deliberate divergences —
-  see per-connector README `novuProviderId` frontmatter for the canonical
-  mapping:
+- **Provider IDs:** mostly match Novu enums. Four deliberate divergences:
     - `brevo` (Novu calls it `sendinblue`)
     - `infobip` (Novu calls it `infobip-sms`)
     - `ms-teams` (Novu calls it `msteams`) — note the hyphen

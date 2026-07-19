@@ -1,28 +1,3 @@
----
-providerId: apns
-channel: push
-auth:
-  method: jwt-es256
-  tokenLifecycle: short-lived-signed
-  tokenCacheHookSupported: true
-endpoint:
-  default: https://api.push.apple.com:443
-  regional:
-    - https://api.push.apple.com
-    - https://api.sandbox.push.apple.com
-versioning:
-  vendorApiVersion: hpapi
-  lastVerified: 2026-05-17
-notes_passthrough: |
-  Forward APNs `aps` keys (`alert`, `sound`, `badge`, `mutable-content`,
-  `content-available`, `category`, `thread-id`) and custom top-level keys
-  via `_passthrough.body`.
-attachments_supported: false
-templates_supported: false
-novuProviderId: apns
-tier: 2
----
-
 # APNs (Apple Push Notification service) Connector
 
 ## Quick install

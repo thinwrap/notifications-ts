@@ -1,25 +1,3 @@
----
-providerId: sendgrid
-channel: email
-auth:
-  method: bearer
-  tokenLifecycle: static
-  tokenCacheHookSupported: false
-endpoint:
-  default: https://api.sendgrid.com/v3/mail/send
-versioning:
-  vendorApiVersion: v3
-  lastVerified: 2026-05-17
-notes_passthrough: |
-  SendGrid's dynamic templates use `template_id` + `dynamic_template_data` —
-  forward via `_passthrough.body`. No casing transformation is applied to
-  passthrough fields.
-attachments_supported: true
-templates_supported: true
-novuProviderId: sendgrid
-tier: 1
----
-
 # SendGrid Email Connector
 
 ## Quick install

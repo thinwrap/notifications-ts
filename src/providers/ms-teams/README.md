@@ -1,24 +1,3 @@
----
-providerId: ms-teams
-channel: chat
-auth:
-  method: webhook-url-secret
-  tokenLifecycle: static
-  tokenCacheHookSupported: false
-endpoint:
-  default: https://example.webhook.office.com/webhookb2
-versioning:
-  vendorApiVersion: connector-card
-  lastVerified: 2026-05-17
-notes_passthrough: |
-  Forward Adaptive Card or Office MessageCard payloads via
-  `_passthrough.body`.
-attachments_supported: false
-templates_supported: false
-novuProviderId: msteams
-tier: 1
----
-
 # Microsoft Teams Chat Connector
 
 ## Quick install

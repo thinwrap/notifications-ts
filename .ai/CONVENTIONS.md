@@ -1,8 +1,11 @@
 # `@thinwrap/notifications` — Conventions
 
 Naming, file layout, and test patterns for AI agents adding a connector or refactoring an
-existing one. The frontmatter schema authoritative source is
-[`../schemas/connector-readme-schema.yaml`](../schemas/connector-readme-schema.yaml).
+existing one.
+
+Each provider's per-connector `README.md` is plain Markdown — it opens directly with its
+`# Title` (no YAML metadata block). It is the connector's consumer-facing doc; keep it
+complete and at parity with the sibling-language libraries.
 
 ## Where files live in this repo
 
@@ -18,7 +21,7 @@ src/
     <id>.config.ts               # Config interface
     <id>.types.ts                # narrowed input/result types (only when narrower than base)
     <id>.auth.ts                 # optional — only for non-trivial token lifecycle (FCM, APNs)
-    README.md                    # YAML frontmatter + body (per per-connector-README schema)
+    README.md                    # per-connector consumer doc (plain Markdown)
   types/                         # cross-channel types + provider-id enums
   utils/                         # passthrough merge + small helpers
 ```
@@ -51,7 +54,7 @@ Adding a connector is a one-line enum extension. No numeric enums. The facade sw
 | `<id>.types.ts` | when narrower than base | Narrowed input/result types |
 | `<id>.auth.ts` | only for non-trivial tokens (FCM, APNs) | Token signing / cache wiring |
 | `index.ts` | yes | Barrel re-export |
-| `README.md` | yes | Per-connector docs with YAML frontmatter |
+| `README.md` | yes | Per-connector consumer doc (plain Markdown) |
 
 ## Test pattern (vitest)
 
@@ -76,23 +79,6 @@ describe('SendgridEmailConnector', () => {
   });
 });
 ```
-
-## Per-connector README YAML frontmatter — cheatsheet
-
-Authoritative schema at [`../schemas/connector-readme-schema.yaml`](../schemas/connector-readme-schema.yaml).
-
-Put the frontmatter block at the **very top of the file** (opening `---` on line 1),
-with the `# Title` below the closing `---`. GitHub only renders a `---…---` block as
-(hidden) frontmatter when it leads the file; place it under the title and GitHub leaks
-the raw YAML into the page body. The validator scans past a leading title to the first
-`---`, so it will **not** catch a misplaced block — keep it on top.
-
-Required keys: `providerId`, `channel`, `auth` (with `method` + `tokenLifecycle` +
-`tokenCacheHookSupported`), `endpoint` (with `default`), `versioning` (with
-`vendorApiVersion` + `lastVerified`), `notes_passthrough`.
-
-Optional keys: `regions`, `attachments_supported`, `templates_supported`, `novuProviderId`,
-`tier`.
 
 ## TypeScript / lint / build
 

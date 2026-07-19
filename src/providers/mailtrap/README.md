@@ -1,24 +1,3 @@
----
-providerId: mailtrap
-channel: email
-auth:
-  method: bearer
-  tokenLifecycle: static
-  tokenCacheHookSupported: false
-endpoint:
-  default: https://send.api.mailtrap.io/api/send
-versioning:
-  vendorApiVersion: v1
-  lastVerified: 2026-05-17
-notes_passthrough: |
-  Mailtrap supports `template_uuid` + `template_variables` for templated
-  sends. Forward via `_passthrough.body`.
-attachments_supported: true
-templates_supported: true
-novuProviderId: mailtrap
-tier: 1
----
-
 # Mailtrap Email Connector
 
 ## Quick install

@@ -1,32 +1,3 @@
----
-providerId: scaleway
-channel: email
-auth:
-  method: api-key-header
-  tokenLifecycle: static
-  tokenCacheHookSupported: false
-endpoint:
-  default: https://api.scaleway.com/transactional-email/v1alpha1/regions/fr-par/emails
-  regional:
-    - https://api.scaleway.com/transactional-email/v1alpha1/regions/fr-par/emails
-    - https://api.scaleway.com/transactional-email/v1alpha1/regions/nl-ams/emails
-    - https://api.scaleway.com/transactional-email/v1alpha1/regions/pl-waw/emails
-versioning:
-  vendorApiVersion: v1alpha1
-  lastVerified: 2026-06-02
-notes_passthrough: |
-  Scaleway TEM uses snake_case wire keys. Forward vendor-specific fields (e.g.
-  `scheduled_at`) via `_passthrough.body` — keys are casing-transformed to
-  snake_case before merge, so `{ scheduledAt }` and `{ scheduled_at }` both work.
-regions:
-  - fr-par
-  - nl-ams
-  - pl-waw
-attachments_supported: true
-templates_supported: false
-tier: 2
----
-
 # Scaleway Transactional Email (TEM) Connector
 
 EU-sovereign transactional email. Regions are physically EU-resident

@@ -1,24 +1,3 @@
----
-providerId: plivo
-channel: sms
-auth:
-  method: basic-auth
-  tokenLifecycle: static
-  tokenCacheHookSupported: false
-endpoint:
-  default: https://api.plivo.com/v1/Account
-versioning:
-  vendorApiVersion: v1
-  lastVerified: 2026-05-17
-notes_passthrough: |
-  Forward Plivo fields (`url`, `method`, `log`, `trackable`, etc.) via
-  `_passthrough.body`.
-attachments_supported: false
-templates_supported: false
-novuProviderId: plivo
-tier: 1
----
-
 # Plivo SMS Connector
 
 ## Quick install

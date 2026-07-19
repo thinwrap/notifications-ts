@@ -1,27 +1,3 @@
----
-providerId: mailgun
-channel: email
-auth:
-  method: basic-auth
-  tokenLifecycle: static
-  tokenCacheHookSupported: false
-endpoint:
-  default: https://api.mailgun.net/v3
-versioning:
-  vendorApiVersion: v3
-  lastVerified: 2026-05-17
-notes_passthrough: |
-  Mailgun accepts form-encoded fields — `_passthrough.body` keys are forwarded
-  into the form. Use for `o:tag`, `o:tracking`, `h:X-Mailgun-Variables`, etc.
-regions:
-  - us
-  - eu
-attachments_supported: true
-templates_supported: true
-novuProviderId: mailgun
-tier: 1
----
-
 # Mailgun Email Connector
 
 ## Quick install

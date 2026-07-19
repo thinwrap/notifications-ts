@@ -1,25 +1,3 @@
----
-providerId: fcm
-channel: push
-auth:
-  method: jwt-rs256
-  tokenLifecycle: short-lived-signed
-  tokenCacheHookSupported: true
-endpoint:
-  default: https://fcm.googleapis.com/v1/projects
-versioning:
-  vendorApiVersion: v1
-  lastVerified: 2026-05-17
-notes_passthrough: |
-  FCM v1 accepts a rich `message` object — `android`, `apns`, `webpush`,
-  `data`, `topic`, `condition`, `fcm_options`. Forward via `_passthrough.body`.
-  Keys are forwarded verbatim (snake_case).
-attachments_supported: false
-templates_supported: false
-novuProviderId: fcm
-tier: 2
----
-
 # FCM Push Connector
 
 ## Quick install

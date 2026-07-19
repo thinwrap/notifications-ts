@@ -1,24 +1,3 @@
----
-providerId: mailersend
-channel: email
-auth:
-  method: bearer
-  tokenLifecycle: static
-  tokenCacheHookSupported: false
-endpoint:
-  default: https://api.mailersend.com/v1/email
-versioning:
-  vendorApiVersion: v1
-  lastVerified: 2026-05-17
-notes_passthrough: |
-  Forward MailerSend fields (e.g., `template_id`, `variables`, `tags`) via
-  `_passthrough.body`.
-attachments_supported: true
-templates_supported: true
-novuProviderId: mailersend
-tier: 1
----
-
 # MailerSend Email Connector
 
 ## Quick install

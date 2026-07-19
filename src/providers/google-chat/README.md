@@ -1,23 +1,3 @@
----
-providerId: google-chat
-channel: chat
-auth:
-  method: webhook-url-secret
-  tokenLifecycle: static
-  tokenCacheHookSupported: false
-endpoint:
-  default: https://chat.googleapis.com/v1/spaces
-versioning:
-  vendorApiVersion: v1
-  lastVerified: 2026-05-17
-notes_passthrough: |
-  Forward Google Chat Cards v2 payloads via `_passthrough.body`.
-attachments_supported: false
-templates_supported: false
-novuProviderId: null
-tier: 1
----
-
 # Google Chat Chat Connector
 
 ## Quick install

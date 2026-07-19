@@ -1,24 +1,3 @@
----
-providerId: telnyx
-channel: sms
-auth:
-  method: bearer
-  tokenLifecycle: static
-  tokenCacheHookSupported: false
-endpoint:
-  default: https://api.telnyx.com/v2/messages
-versioning:
-  vendorApiVersion: v2
-  lastVerified: 2026-05-17
-notes_passthrough: |
-  Forward Telnyx fields (`messaging_profile_id`, `media_urls`,
-  `webhook_url`, etc.) via `_passthrough.body`.
-attachments_supported: false
-templates_supported: false
-novuProviderId: telnyx
-tier: 2
----
-
 # Telnyx SMS Connector
 
 ## Quick install

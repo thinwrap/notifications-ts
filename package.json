@@ -40,7 +40,6 @@
     "test:watch": "vitest",
     "lint": "eslint src/",
     "lint:fix": "eslint src/ --fix",
-    "lint:frontmatter": "node scripts/validate-frontmatter.mjs",
     "fix:imports": "node scripts/shorten-imports.mjs",
     "size": "size-limit",
     "size:why": "size-limit --why",
@@ -72,7 +71,7 @@
     "type": "git",
     "url": "https://github.com/thinwrap/notifications-ts"
   },
-  "homepage": "https://github.com/thinwrap/notifications-ts#readme",
+  "homepage": "https://thinwrap.dev",
   "bugs": {
     "url": "https://github.com/thinwrap/notifications-ts/issues"
   },

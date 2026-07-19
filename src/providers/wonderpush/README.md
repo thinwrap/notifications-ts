@@ -1,24 +1,3 @@
----
-providerId: wonderpush
-channel: push
-auth:
-  method: bearer
-  tokenLifecycle: static
-  tokenCacheHookSupported: false
-endpoint:
-  default: https://management-api.wonderpush.com/v1/deliveries
-versioning:
-  vendorApiVersion: v1
-  lastVerified: 2026-05-17
-notes_passthrough: |
-  Forward WonderPush fields (`segments`, `targetUsers`, `scheduledTime`)
-  via `_passthrough.body`.
-attachments_supported: false
-templates_supported: false
-novuProviderId: null
-tier: 2
----
-
 # WonderPush Push Connector
 
 ## Quick install

@@ -1,33 +1,3 @@
----
-providerId: sns
-channel: sms
-auth:
-  method: aws-sigv4
-  tokenLifecycle: static
-  tokenCacheHookSupported: false
-endpoint:
-  default: https://sns.us-east-1.amazonaws.com
-versioning:
-  vendorApiVersion: 2010-03-31
-  lastVerified: 2026-05-17
-notes_passthrough: |
-  SNS uses form-encoded `Publish` action. Forward attributes like
-  `AWS.SNS.SMS.SMSType`, `AWS.SNS.SMS.SenderID` via `_passthrough.body` (sent
-  as `MessageAttributes.entry.N.*` keys).
-regions:
-  - us-east-1
-  - us-west-2
-  - eu-west-1
-  - eu-central-1
-  - ap-southeast-1
-  - ap-southeast-2
-  - ap-northeast-1
-attachments_supported: false
-templates_supported: false
-novuProviderId: sns
-tier: 2
----
-
 # Amazon SNS SMS Connector
 
 ## Quick install

@@ -12,7 +12,7 @@ documentation.
 
 - **guidelines.md** (this file) — entry point + the "add a connector" recipe.
 - [`ARCHITECTURE.md`](./ARCHITECTURE.md) — the facade → dispatch → base model and the invariants every change must hold.
-- [`CONVENTIONS.md`](./CONVENTIONS.md) — file layout, naming, TypeScript/build config, the per-connector README frontmatter.
+- [`CONVENTIONS.md`](./CONVENTIONS.md) — file layout, naming, TypeScript/build config, the per-connector README convention.
 - [`TEST-FIXTURES.md`](./TEST-FIXTURES.md) — shared spec fixtures (`Retry-After`, `TokenCacheHook`).
 
 ## The shape in one sentence
@@ -48,7 +48,7 @@ is involved. Touch-points, in order:
    - `<id>.types.ts` — only when narrowing.
    - `<id>.auth.ts` — only for non-trivial token lifecycle (FCM, APNs).
    - `index.ts` — barrel re-export.
-   - `README.md` — YAML frontmatter (schema: [`../schemas/connector-readme-schema.yaml`](../schemas/connector-readme-schema.yaml)) + body. **This** is the connector's consumer doc.
+   - `README.md` — plain Markdown that opens directly with its `# Title` (no YAML metadata block). **This** is the connector's consumer doc; keep it complete and at parity with the sibling-language libraries.
 5. **Dispatch** — add the case to `src/facades/<channel>.facade.ts`.
 6. **Export** — re-export the connector + config from [`src/index.ts`](../src/index.ts), the only public surface.
 7. **Budget** — register the connector in the bundle-size budget so `npm run size` covers it.
@@ -59,7 +59,6 @@ is involved. Touch-points, in order:
 npm run typecheck        # strict; enum / config-map sync
 npm test                 # vitest — single file: npx vitest src/providers/<id>/<id>.connector.spec.ts
 npm run lint
-npm run lint:frontmatter # validates every connector README against the schema
 npm run build && npm run check:dist   # dual CJS/ESM emit + import smoke
 npm run size             # per-connector gzip budget
 ```

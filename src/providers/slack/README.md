@@ -1,24 +1,3 @@
----
-providerId: slack
-channel: chat
-auth:
-  method: webhook-url-secret
-  tokenLifecycle: static
-  tokenCacheHookSupported: false
-endpoint:
-  default: https://hooks.slack.com/services
-versioning:
-  vendorApiVersion: incoming-webhook
-  lastVerified: 2026-05-17
-notes_passthrough: |
-  Forward Slack Block Kit (`blocks`, `attachments`, `thread_ts`) via
-  `_passthrough.body`.
-attachments_supported: false
-templates_supported: false
-novuProviderId: slack
-tier: 1
----
-
 # Slack Chat Connector
 
 ## Quick install
