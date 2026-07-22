@@ -57,5 +57,5 @@ await gc.send({
 
 ## Vendor docs
 
-- API reference: https://developers.google.com/chat/api/guides/message-formats
+- API reference: https://developers.google.com/workspace/chat/messages-overview
 - Cards v2: https://developers.google.com/chat/api/guides/v1/messages/create#card

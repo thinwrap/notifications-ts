@@ -350,9 +350,11 @@ describe('SparkPostEmailConnector', () => {
         string,
         unknown
       >;
+      // Top-level fields are cased to snake_case; nested data-map keys
+      // (substitution_data / metadata) pass through VERBATIM.
       expect(body.campaign_id).toBe('c1');
-      expect(body.substitution_data).toEqual({ first_name: 'Alex' });
-      expect(body.metadata).toEqual({ customer_id: 'u-42' });
+      expect(body.substitution_data).toEqual({ firstName: 'Alex' });
+      expect(body.metadata).toEqual({ customerId: 'u-42' });
       expect(body.campaignId).toBeUndefined();
       expect(body.substitutionData).toBeUndefined();
     });

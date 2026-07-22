@@ -73,7 +73,7 @@ export class BrevoEmailConnector
 
     // No casing transform on _passthrough.body — Brevo wire is camelCase and
     // consumers are expected to write Brevo's camelCase shape directly.
-    const { body: mergedBody, headers: mergedHeaders, query: mergedQuery } =
+    const { body: mergedBody, headers: mergedHeaders } =
       mergePassthrough<Record<string, unknown>>(
         connectorBody,
         {
@@ -84,8 +84,7 @@ export class BrevoEmailConnector
         input._passthrough,
       );
 
-    const queryString = buildQueryString(mergedQuery);
-    const url = `${BREVO_ENDPOINT}${queryString}`;
+    const url = BREVO_ENDPOINT;
     const serializedBody = JSON.stringify(mergedBody);
 
     let response: Response;
@@ -332,12 +331,6 @@ export class BrevoEmailConnector
 // ---------------------------------------------------------------------------
 // Module-private helpers
 // ---------------------------------------------------------------------------
-
-function buildQueryString(query: Record<string, string>): string {
-  const keys = Object.keys(query);
-  if (keys.length === 0) return '';
-  return '?' + new URLSearchParams(query).toString();
-}
 
 /**
  * Map Brevo (HTTP status, error code, message) to canonical `ProviderCode` per

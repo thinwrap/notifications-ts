@@ -12,24 +12,12 @@ import { ConnectorError } from '../../types';
 import type { ProviderCode } from '../../types';
 import { mergePassthrough } from '../../utils';
 import { parseRetryAfter } from '../../utils';
+import { redactSecrets, scrubTransportError } from '../../utils';
 import type { DiscordConfig } from './discord.config';
 import type {
   DiscordNarrowedInput,
   DiscordWebhookResponse,
 } from './discord.types';
-
-/**
- * Defense-in-depth: the Discord webhook URL IS the credential (its trailing
- * path segment is the secret token). Mirroring the Telegram connector's
- * `redactBotToken`, scrub the webhook URL from any text surfaced through error
- * messages so an underlying fetch error can't leak it into logs or stack
- * traces. Literal (split/join) replacement — a URL is full of regex-special
- * characters, so this is both simpler and safer than a built RegExp.
- */
-function redactWebhookUrl(input: string, webhookUrl: string | undefined): string {
-  if (!webhookUrl) return input;
-  return input.split(webhookUrl).join('<redacted>');
-}
 
 /**
  * Webhook-URL-as-auth. No Authorization header; the webhookUrl IS the credential.
@@ -77,6 +65,17 @@ export class DiscordChatConnector
       });
     }
 
+    if (!/^https:\/\//i.test(this.config.webhookUrl)) {
+      // The webhook URL IS the credential; refuse cleartext http so a
+      // stale/typo'd config cannot leak the token over the wire.
+      throw new ConnectorError({
+        message: 'Discord webhookUrl must be an https:// URL.',
+        statusCode: 400,
+        providerCode: 'invalid_request',
+        providerMessage: 'Discord webhookUrl must be an https:// URL.',
+      });
+    }
+
     const connectorBody: Record<string, unknown> = { content: input.body };
     if (input.embeds !== undefined) connectorBody.embeds = input.embeds;
     if (input.components !== undefined) connectorBody.components = input.components;
@@ -109,22 +108,24 @@ export class DiscordChatConnector
         body: JSON.stringify(mergedBody),
       });
     } catch (error) {
-      // redact the webhook URL (the credential) from any surfaced error text.
-      const rawMessage = (error as Error).message ?? 'Network error';
-      const safeMessage = redactWebhookUrl(rawMessage, this.config.webhookUrl);
-      if ((error as Error)?.name === 'AbortError') {
+      // The webhook URL IS the credential; redact it from surfaced error text
+      // and never store the raw fetch error.
+      const err = error as Error;
+      const safeMessage = redactSecrets(err.message ?? 'Network error', [this.config.webhookUrl]);
+      const cause = scrubTransportError(err);
+      if (err?.name === 'AbortError') {
         throw new ConnectorError({
           message: safeMessage,
           statusCode: null,
           providerCode: 'invalid_request',
-          cause: error,
+          cause,
         });
       }
       throw new ConnectorError({
         message: safeMessage,
         statusCode: null,
         providerCode: 'provider_unavailable',
-        cause: { raw: error },
+        cause,
       });
     }
 
@@ -255,22 +256,22 @@ export class DiscordChatConnector
         body: JSON.stringify(body),
       });
     } catch (error) {
-      // redact the webhook URL (the credential) from any surfaced error text.
-      const rawMessage = (error as Error).message ?? 'Network error';
-      const safeMessage = redactWebhookUrl(rawMessage, webhookUrl);
-      if ((error as Error)?.name === 'AbortError') {
+      const err = error as Error;
+      const safeMessage = redactSecrets(err.message ?? 'Network error', [webhookUrl]);
+      const cause = scrubTransportError(err);
+      if (err?.name === 'AbortError') {
         throw new ConnectorError({
           message: safeMessage,
           statusCode: null,
           providerCode: 'invalid_request',
-          cause: error,
+          cause,
         });
       }
       throw new ConnectorError({
         message: safeMessage,
         statusCode: null,
         providerCode: 'provider_unavailable',
-        cause: { raw: error },
+        cause,
       });
     }
 

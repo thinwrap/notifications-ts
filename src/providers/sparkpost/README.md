@@ -81,5 +81,5 @@ await sp.send({
 ## Vendor docs
 
 - API reference: https://developers.sparkpost.com/api/transmissions/
-- EU endpoint: https://www.sparkpost.com/docs/getting-started/getting-started-sparkpost/#eu-account-information
+- EU endpoint: https://developers.sparkpost.com/api/index.html
 - Rate limits: https://developers.sparkpost.com/api/index.html#header-rate-limiting

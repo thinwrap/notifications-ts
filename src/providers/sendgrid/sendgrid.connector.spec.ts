@@ -373,7 +373,10 @@ describe('SendgridEmailConnector', () => {
         string,
         unknown
       >;
-      expect(body.dynamic_template_data).toEqual({ first_name: 'Alex' });
+      // Top-level field is cased to snake_case, but the nested data-map keys
+      // (template variables) pass through VERBATIM — they are the consumer's
+      // data and must match the template placeholders exactly.
+      expect(body.dynamic_template_data).toEqual({ firstName: 'Alex' });
       expect(body.dynamicTemplateData).toBeUndefined();
     });
 
@@ -416,21 +419,6 @@ describe('SendgridEmailConnector', () => {
       expect(headers['X-Custom-Header']).toBe('value');
       expect(headers['On-Behalf-Of']).toBe('sub-account');
       expect(headers.Authorization).toBe('Bearer SG.test_key');
-    });
-
-    it('folds _passthrough.query into the URL', async () => {
-      mockFetch.mockResolvedValueOnce(sendgridSuccessResponse());
-
-      await connector.send({
-        from: 'sender@example.com',
-        to: 'r@example.com',
-        subject: 'q',
-        text: 't',
-        _passthrough: { query: { trace: 'on' } },
-      });
-
-      const [url] = mockFetch.mock.calls[0]!;
-      expect(url).toBe('https://api.sendgrid.com/v3/mail/send?trace=on');
     });
 
     // -------------------------------------------------------------------------

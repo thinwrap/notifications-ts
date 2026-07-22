@@ -87,6 +87,6 @@ _passthrough: {
 
 ## Vendor docs
 
-- API reference: https://docs.sendgrid.com/api-reference/mail-send/mail-send
-- Error codes: https://docs.sendgrid.com/api-reference/how-to-use-the-sendgrid-v3-api/responses
-- Rate limits: https://docs.sendgrid.com/for-developers/sending-email/api-rate-limits
+- API reference: https://www.twilio.com/docs/sendgrid/api-reference/mail-send/mail-send
+- Error codes: https://www.twilio.com/docs/sendgrid/api-reference/how-to-use-the-sendgrid-v3-api/responses
+- Rate limits: https://www.twilio.com/docs/sendgrid/api-reference/how-to-use-the-sendgrid-v3-api/rate-limits

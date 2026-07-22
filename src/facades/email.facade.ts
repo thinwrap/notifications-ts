@@ -100,6 +100,17 @@ export class Email<P extends EmailProvider = EmailProvider> {
     if (typeof c.checkIntegration === 'function') {
       try {
         const result = await c.checkIntegration();
+        // The connector's checkIntegration catches its own errors and RETURNS a
+        // `{ success, message }` verdict rather than throwing. Honor that verdict
+        // — wrapping any resolved value as `success: true` reported a failed
+        // integration (bad credentials, unreachable host) as a success.
+        if (result && typeof result === 'object' && 'success' in result) {
+          const r = result as { success: unknown; message?: unknown };
+          return {
+            success: r.success === true,
+            message: typeof r.message === 'string' ? r.message : JSON.stringify(result),
+          };
+        }
         return { success: true, message: JSON.stringify(result) };
       } catch (err) {
         return { success: false, message: (err as Error).message };

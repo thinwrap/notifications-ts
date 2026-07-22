@@ -176,6 +176,46 @@ describe('SesEmailConnector', () => {
       expect(decoded).toContain(fileBuf.toString('base64'));
     });
 
+    it('RFC 2047-encodes only the non-ASCII sender display name, keeping a bare addr-spec in From', async () => {
+      mockFetch.mockResolvedValueOnce(sesSuccessResponse());
+
+      // Attachments force the Raw-MIME path where From is hand-built.
+      const conn = new SesEmailConnector({
+        ...defaultConfig,
+        senderName: 'Café ☕ Señor',
+      });
+
+      await conn.send({
+        from: 'sender@example.com',
+        to: 'recipient@example.com',
+        subject: 'Attachment Test',
+        html: '<p>hi</p>',
+        attachments: [
+          {
+            filename: 'report.pdf',
+            contentType: 'application/pdf',
+            content: Buffer.from('PDF'),
+          },
+        ],
+      });
+
+      const [, init] = mockFetch.mock.calls[0]!;
+      const body = JSON.parse((init as RequestInit).body as string) as {
+        Content: { Raw: { Data: string } };
+      };
+      const decoded = Buffer.from(body.Content.Raw.Data, 'base64').toString('utf-8');
+
+      const fromLine = decoded
+        .split('\r\n')
+        .find((l) => l.startsWith('From: '));
+      expect(fromLine).toBeDefined();
+      // addr-spec stays bare and parseable — NOT swallowed into an encoded-word.
+      expect(fromLine).toMatch(
+        /^From: =\?UTF-8\?B\?[A-Za-z0-9+/=]+\?= <sender@example\.com>$/,
+      );
+      expect(decoded).toContain('<sender@example.com>');
+    });
+
     it('encodes string-typed attachment content as UTF-8 base64', async () => {
       mockFetch.mockResolvedValueOnce(sesSuccessResponse());
 
@@ -222,12 +262,18 @@ describe('SesEmailConnector', () => {
       };
       const decoded = Buffer.from(body.Content.Raw.Data, 'base64').toString('utf-8');
 
-      // The é/€/☕ must survive intact (would corrupt under latin1 base64).
-      expect(decoded).toContain('Prix: 5€ — café ☕');
-      // UTF-8 text parts must be declared 8bit, never 7bit.
+      // Body parts are base64 (7-bit-safe), never 8bit/7bit.
       expect(decoded).toContain('Content-Type: text/plain; charset=UTF-8');
-      expect(decoded).toContain('Content-Transfer-Encoding: 8bit');
+      expect(decoded).toContain('Content-Transfer-Encoding: base64');
+      expect(decoded).not.toContain('Content-Transfer-Encoding: 8bit');
       expect(decoded).not.toContain('Content-Transfer-Encoding: 7bit');
+      // The é/€/☕ must survive intact: decode each base64 body part and confirm.
+      const decodedParts = decoded
+        .split(/\r\n/)
+        .filter((l) => /^[A-Za-z0-9+/=]+$/.test(l) && l.length > 8)
+        .map((l) => Buffer.from(l, 'base64').toString('utf-8'))
+        .join('');
+      expect(decodedParts).toContain('Prix: 5€ — café ☕');
     });
 
     it('wraps attachment base64 at 76-char lines (RFC 2045/5322 conformance)', async () => {

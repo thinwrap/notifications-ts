@@ -12,6 +12,22 @@ describe('transformKeys', () => {
     ).toEqual({ outer_key: { inner_key: 'v' } });
   });
 
+  it('with { deep: false } transforms only top-level keys, passing nested data-maps verbatim', () => {
+    // How connectors normalize `_passthrough.body`: the top-level provider
+    // field is cased, but nested data-carrying maps (template data / metadata)
+    // keep their keys exactly as the consumer wrote them.
+    expect(
+      transformKeys(
+        { dynamicTemplateData: { firstName: 'Ann' }, customArgs: { userId: 'u1' } },
+        CasingEnum.SNAKE_CASE,
+        { deep: false },
+      ),
+    ).toEqual({
+      dynamic_template_data: { firstName: 'Ann' },
+      custom_args: { userId: 'u1' },
+    });
+  });
+
   it('does not recurse into Buffer values when Buffer is available', () => {
     const buf = Buffer.from('binary-bytes');
     const result = transformKeys(

@@ -12,6 +12,7 @@ import { ConnectorError } from '../../types';
 import type { ProviderCode } from '../../types';
 import { mergePassthrough } from '../../utils';
 import { parseRetryAfter } from '../../utils';
+import { redactSecrets, scrubTransportError } from '../../utils';
 import type { GoogleChatConfig } from './google-chat.config';
 import type {
   GoogleChatNarrowedInput,
@@ -64,6 +65,17 @@ export class GoogleChatChatConnector
       });
     }
 
+    if (!/^https:\/\//i.test(this.config.webhookUrl)) {
+      // The webhook URL IS the credential; refuse cleartext http so a
+      // stale/typo'd config cannot leak the token over the wire.
+      throw new ConnectorError({
+        message: 'Google Chat webhookUrl must be an https:// URL.',
+        statusCode: 400,
+        providerCode: 'invalid_request',
+        providerMessage: 'Google Chat webhookUrl must be an https:// URL.',
+      });
+    }
+
     const connectorBody: Record<string, unknown> = { text: input.body };
     if (input.cardsV2 !== undefined) connectorBody.cardsV2 = input.cardsV2;
     if (input.thread !== undefined) connectorBody.thread = input.thread;
@@ -89,19 +101,24 @@ export class GoogleChatChatConnector
         body: JSON.stringify(mergedBody),
       });
     } catch (error) {
-      if ((error as Error)?.name === 'AbortError') {
+      // The webhook URL (incl. its `?key=&token=` credential surface) IS the
+      // credential; redact it from surfaced error text and never store the raw
+      // fetch error.
+      const err = error as Error;
+      const cause = scrubTransportError(err);
+      if (err?.name === 'AbortError') {
         throw new ConnectorError({
-          message: (error as Error).message ?? 'Request cancelled',
+          message: redactSecrets(err.message ?? 'Request cancelled', [this.config.webhookUrl]),
           statusCode: null,
           providerCode: 'invalid_request',
-          cause: error,
+          cause,
         });
       }
       throw new ConnectorError({
-        message: (error as Error).message ?? 'Network error',
+        message: redactSecrets(err.message ?? 'Network error', [this.config.webhookUrl]),
         statusCode: null,
         providerCode: 'provider_unavailable',
-        cause: { raw: error },
+        cause,
       });
     }
 
@@ -205,19 +222,21 @@ export class GoogleChatChatConnector
         body: JSON.stringify(body),
       });
     } catch (error) {
-      if ((error as Error)?.name === 'AbortError') {
+      const err = error as Error;
+      const cause = scrubTransportError(err);
+      if (err?.name === 'AbortError') {
         throw new ConnectorError({
-          message: (error as Error).message ?? 'Request cancelled',
+          message: redactSecrets(err.message ?? 'Request cancelled', [webhookUrl]),
           statusCode: null,
           providerCode: 'invalid_request',
-          cause: error,
+          cause,
         });
       }
       throw new ConnectorError({
-        message: (error as Error).message ?? 'Network error',
+        message: redactSecrets(err.message ?? 'Network error', [webhookUrl]),
         statusCode: null,
         providerCode: 'provider_unavailable',
-        cause: { raw: error },
+        cause,
       });
     }
 

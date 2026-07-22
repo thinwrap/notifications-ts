@@ -11,21 +11,9 @@ import { ChannelTypeEnum } from '../../types';
 import { ConnectorError } from '../../types';
 import type { ProviderCode } from '../../types';
 import { mergePassthrough } from '../../utils';
+import { redactSecrets, scrubTransportError } from '../../utils';
 import type { TelegramConfig } from './telegram.config';
 import type { TelegramNarrowedInput, TelegramResponse } from './telegram.types';
-
-/**
- *  (security): redact the bot token from any text surfaced through error
- * messages. Telegram URLs embed the token in the path (`/bot<token>/sendMessage`),
- * which means underlying fetch errors can leak it into stack traces or logs.
- */
-function redactBotToken(input: string, botToken: string): string {
-  if (!botToken) return input;
-  return input.replace(
-    new RegExp(botToken.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'),
-    '<redacted>',
-  );
-}
 
 export class TelegramChatConnector
   extends BaseConnector
@@ -93,22 +81,24 @@ export class TelegramChatConnector
         body: JSON.stringify(mergedBody),
       });
     } catch (error) {
-      // redact bot token in any surfaced error text.
-      const rawMessage = (error as Error).message ?? 'Network error';
-      const safeMessage = redactBotToken(rawMessage, this.config.botToken);
-      if ((error as Error)?.name === 'AbortError') {
+      // The bot token is embedded in the request URL path; redact it from
+      // surfaced error text and never store the raw fetch error.
+      const err = error as Error;
+      const safeMessage = redactSecrets(err.message ?? 'Network error', [this.config.botToken]);
+      const cause = scrubTransportError(err);
+      if (err?.name === 'AbortError') {
         throw new ConnectorError({
           message: safeMessage,
           statusCode: null,
           providerCode: 'invalid_request',
-          cause: error,
+          cause,
         });
       }
       throw new ConnectorError({
         message: safeMessage,
         statusCode: null,
         providerCode: 'provider_unavailable',
-        cause: { raw: error },
+        cause,
       });
     }
 
@@ -228,22 +218,24 @@ export class TelegramChatConnector
         }
       );
     } catch (error) {
-      // redact bot token in any surfaced error text.
-      const rawMessage = (error as Error).message ?? 'Network error';
-      const safeMessage = redactBotToken(rawMessage, this.config.botToken);
-      if ((error as Error)?.name === 'AbortError') {
+      // The bot token is embedded in the request URL path; redact it from
+      // surfaced error text and never store the raw fetch error.
+      const err = error as Error;
+      const safeMessage = redactSecrets(err.message ?? 'Network error', [this.config.botToken]);
+      const cause = scrubTransportError(err);
+      if (err?.name === 'AbortError') {
         throw new ConnectorError({
           message: safeMessage,
           statusCode: null,
           providerCode: 'invalid_request',
-          cause: error,
+          cause,
         });
       }
       throw new ConnectorError({
         message: safeMessage,
         statusCode: null,
         providerCode: 'provider_unavailable',
-        cause: { raw: error },
+        cause,
       });
     }
 

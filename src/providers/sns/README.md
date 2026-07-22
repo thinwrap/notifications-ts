@@ -68,5 +68,5 @@ await sns.send({
 ## Vendor docs
 
 - API reference: https://docs.aws.amazon.com/sns/latest/api/API_Publish.html
-- SMS attributes: https://docs.aws.amazon.com/sns/latest/dg/sms_publish-to-phone.html
+- SMS attributes: https://docs.aws.amazon.com/sns/latest/dg/sms_sending-overview.html#sms_publish-to-phone
 - Regional availability: https://docs.aws.amazon.com/sns/latest/dg/sns-supported-regions-countries.html

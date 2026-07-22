@@ -340,21 +340,6 @@ describe('BrevoEmailConnector', () => {
       expect(headers['api-key']).toBe('xkeysib-test-123');
     });
 
-    it('folds _passthrough.query into the URL', async () => {
-      mockFetch.mockResolvedValueOnce(brevoSuccessResponse());
-
-      await connector.send({
-        from: 'sender@example.com',
-        to: 'r@example.com',
-        subject: 'q',
-        text: 't',
-        _passthrough: { query: { trace: 'on' } },
-      });
-
-      const [url] = mockFetch.mock.calls[0]!;
-      expect(url).toBe('https://api.brevo.com/v3/smtp/email?trace=on');
-    });
-
     // -------------------------------------------------------------------------
     // Error mapping table
     // -------------------------------------------------------------------------

@@ -58,5 +58,5 @@ await wp.send({
 
 ## Vendor docs
 
-- API reference: https://docs.wonderpush.com/reference/post_deliveries
+- API reference: https://docs.wonderpush.com/reference/post-deliveries
 - Auth: https://docs.wonderpush.com/reference/authentication

@@ -54,5 +54,4 @@ await d7.send({
 
 ## Vendor docs
 
-- API reference: https://app.swaggerhub.com/apis-docs/D7Networks/messages/1.1.0
-- Errors: https://d7networks.com/docs/Messages/Error-Codes/
+- API reference: https://d7networks.com/docs/sms/send-sms/

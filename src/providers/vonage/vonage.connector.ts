@@ -112,7 +112,7 @@ export class VonageSmsConnector
       connectorBody.callback = input.callback;
     }
 
-    const { body: mergedBody, headers: mergedHeaders, query: mergedQuery } =
+    const { body: mergedBody, headers: mergedHeaders } =
       mergePassthrough<Record<string, unknown>>(
         connectorBody,
         { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -127,14 +127,9 @@ export class VonageSmsConnector
       formBody.append(key, String(value));
     }
 
-    const finalUrl =
-      Object.keys(mergedQuery).length > 0
-        ? `${VONAGE_ENDPOINT}?${new URLSearchParams(mergedQuery).toString()}`
-        : VONAGE_ENDPOINT;
-
     let response: Response;
     try {
-      response = await this.fetchImpl(finalUrl, {
+      response = await this.fetchImpl(VONAGE_ENDPOINT, {
         method: 'POST',
         headers: mergedHeaders,
         body: formBody.toString(),

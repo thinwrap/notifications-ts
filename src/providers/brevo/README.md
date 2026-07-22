@@ -68,6 +68,6 @@ await bv.send({
 
 ## Vendor docs
 
-- API reference: https://developers.brevo.com/reference/sendtransacemail
+- API reference: https://developers.brevo.com/reference/send-transac-email
 - Templates: https://developers.brevo.com/docs/send-a-transactional-email
 - Rate limits: https://developers.brevo.com/docs/api-limits

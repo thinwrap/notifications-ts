@@ -75,10 +75,21 @@ export async function getAccessToken(
     });
   }
 
-  const data = (await response.json()) as GoogleTokenResponse;
+  // A 200 with a non-JSON or token-less body must NOT flow through as
+  // `Bearer undefined` on the next request — validate the token is a non-empty
+  // string and surface a typed auth_failed otherwise.
+  const data = (await response.json().catch(() => null)) as GoogleTokenResponse | null;
+  if (!data || typeof data.access_token !== 'string' || data.access_token.length === 0) {
+    throw new ConnectorError({
+      message: 'FCM OAuth token exchange returned a 200 with no usable access_token',
+      statusCode: response.status,
+      providerCode: 'auth_failed',
+      providerMessage: 'FCM OAuth token exchange returned no access_token',
+    });
+  }
 
   return {
     accessToken: data.access_token,
-    expiresInSeconds: data.expires_in,
+    expiresInSeconds: typeof data.expires_in === 'number' ? data.expires_in : 0,
   };
 }

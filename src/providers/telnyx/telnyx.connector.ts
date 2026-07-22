@@ -85,7 +85,7 @@ export class TelnyxSmsConnector
     if (input.mediaUrls) connectorBody.media_urls = input.mediaUrls;
     if (input.subject) connectorBody.subject = input.subject;
 
-    const { body: mergedBody, headers: mergedHeaders, query: mergedQuery } =
+    const { body: mergedBody, headers: mergedHeaders } =
       mergePassthrough<Record<string, unknown>>(
         connectorBody,
         {
@@ -95,14 +95,9 @@ export class TelnyxSmsConnector
         input._passthrough,
       );
 
-    const finalUrl =
-      Object.keys(mergedQuery).length > 0
-        ? `${TELNYX_ENDPOINT}?${new URLSearchParams(mergedQuery).toString()}`
-        : TELNYX_ENDPOINT;
-
     let response: Response;
     try {
-      response = await this.fetchImpl(finalUrl, {
+      response = await this.fetchImpl(TELNYX_ENDPOINT, {
         method: 'POST',
         headers: mergedHeaders,
         body: JSON.stringify(mergedBody),

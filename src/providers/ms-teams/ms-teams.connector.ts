@@ -12,6 +12,7 @@ import { ConnectorError } from '../../types';
 import type { ProviderCode } from '../../types';
 import { mergePassthrough } from '../../utils';
 import { parseRetryAfter } from '../../utils';
+import { redactSecrets, scrubTransportError } from '../../utils';
 import type { MsTeamsConfig } from './ms-teams.config';
 import { ADAPTIVE_CARD_SCHEMA } from './ms-teams.types';
 import type { AdaptiveCard, MsTeamsNarrowedInput } from './ms-teams.types';
@@ -61,6 +62,17 @@ export class MsTeamsChatConnector
       });
     }
 
+    if (!/^https:\/\//i.test(this.config.webhookUrl)) {
+      // The webhook URL IS the credential; refuse cleartext http so a
+      // stale/typo'd config cannot leak the token over the wire.
+      throw new ConnectorError({
+        message: 'MS Teams webhookUrl must be an https:// URL.',
+        statusCode: 400,
+        providerCode: 'invalid_request',
+        providerMessage: 'MS Teams webhookUrl must be an https:// URL.',
+      });
+    }
+
     const card: AdaptiveCard =
       input.card ?? {
         type: 'AdaptiveCard',
@@ -79,39 +91,38 @@ export class MsTeamsChatConnector
       ],
     };
 
-    const { body: mergedBody, headers: mergedHeaders, query: mergedQuery } =
+    const { body: mergedBody, headers: mergedHeaders } =
       mergePassthrough<Record<string, unknown>>(
         connectorBody,
         { 'Content-Type': 'application/json' },
         input._passthrough,
       );
 
-    const finalUrl =
-      Object.keys(mergedQuery).length > 0
-        ? `${this.config.webhookUrl}?${new URLSearchParams(mergedQuery).toString()}`
-        : this.config.webhookUrl;
-
     let response: Response;
     try {
-      response = await this.fetchImpl(finalUrl, {
+      response = await this.fetchImpl(this.config.webhookUrl, {
         method: 'POST',
         headers: mergedHeaders,
         body: JSON.stringify(mergedBody),
       });
     } catch (error) {
-      if ((error as Error)?.name === 'AbortError') {
+      // The webhook URL IS the credential; redact it from surfaced error text
+      // and never store the raw fetch error.
+      const err = error as Error;
+      const cause = scrubTransportError(err);
+      if (err?.name === 'AbortError') {
         throw new ConnectorError({
-          message: (error as Error).message ?? 'Request cancelled',
+          message: redactSecrets(err.message ?? 'Request cancelled', [this.config.webhookUrl]),
           statusCode: null,
           providerCode: 'invalid_request',
-          cause: error,
+          cause,
         });
       }
       throw new ConnectorError({
-        message: (error as Error).message ?? 'Network error',
+        message: redactSecrets(err.message ?? 'Network error', [this.config.webhookUrl]),
         statusCode: null,
         providerCode: 'provider_unavailable',
-        cause: { raw: error },
+        cause,
       });
     }
 
@@ -121,8 +132,16 @@ export class MsTeamsChatConnector
     }
 
     // MS Teams Incoming Webhooks return plain text "1" on success — no JSON,
-    // no message id. Use Graph API (Bearer-token auth) for message identifiers.
+    // no message id. On failure (including throttling) they STILL return HTTP
+    // 200, but with an error string in the body, e.g.
+    // "...Teams endpoint returned HTTP error 429 with ContextId...". Treat any
+    // body other than "1" as a failure so it is not silently reported as sent.
     const rawText = await response.text().catch(() => '');
+    if (rawText.trim() !== '1') {
+      const embedded = /HTTP error (\d{3})/i.exec(rawText);
+      const effectiveStatus = embedded ? Number(embedded[1]) : 502;
+      throw this.mapVendorError(effectiveStatus, rawText, response.headers);
+    }
     return {
       success: true,
       status: 'sent',
@@ -237,19 +256,21 @@ export class MsTeamsChatConnector
         body: JSON.stringify(body),
       });
     } catch (error) {
-      if ((error as Error)?.name === 'AbortError') {
+      const err = error as Error;
+      const cause = scrubTransportError(err);
+      if (err?.name === 'AbortError') {
         throw new ConnectorError({
-          message: (error as Error).message ?? 'Request cancelled',
+          message: redactSecrets(err.message ?? 'Request cancelled', [webhookUrl]),
           statusCode: null,
           providerCode: 'invalid_request',
-          cause: error,
+          cause,
         });
       }
       throw new ConnectorError({
-        message: (error as Error).message ?? 'Network error',
+        message: redactSecrets(err.message ?? 'Network error', [webhookUrl]),
         statusCode: null,
         providerCode: 'provider_unavailable',
-        cause: { raw: error },
+        cause,
       });
     }
 

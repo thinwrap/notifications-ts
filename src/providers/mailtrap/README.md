@@ -68,5 +68,5 @@ await mt.send({
 
 ## Vendor docs
 
-- API reference: https://api-docs.mailtrap.io/docs/mailtrap-api-docs/
-- Sandbox guide: https://help.mailtrap.io/article/108-email-sandbox-api
+- API reference: https://docs.mailtrap.io/developers
+- Sandbox guide: https://docs.mailtrap.io/email-sandbox/setup/sandbox-api-integration

@@ -36,7 +36,7 @@ Bearer credential to FCM.
 By default the wrapper signs + exchanges on every `.send()` (stateless —
 the wrapper holds no state). Pass a `tokenCache: TokenCacheHook` to
 amortize signing cost across many sends — the wrapper memoizes through the
-hook with the deterministic key `'fcm:' + projectId`. On vendor 401/403 the
+hook with the deterministic key `'fcm:' + projectId + ':' + clientEmail`. On vendor 401/403 the
 wrapper does **not** auto-evict; eviction is the consumer's responsibility.
 
 `TokenCacheHook` shape:
@@ -93,4 +93,4 @@ await fcm.send({
 
 - API reference: https://firebase.google.com/docs/reference/fcm/rest/v1/projects.messages/send
 - OAuth2 auth: https://firebase.google.com/docs/cloud-messaging/auth-server
-- Error codes: https://firebase.google.com/docs/cloud-messaging/send-message#admin
+- Error codes: https://firebase.google.com/docs/cloud-messaging/error-codes

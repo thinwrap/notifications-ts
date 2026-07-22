@@ -85,7 +85,7 @@ export class InfobipSmsConnector
     if (input.scheduleSettings?.sendAt !== undefined)
       connectorBody.sendingDateTime = input.scheduleSettings.sendAt;
 
-    const { body: mergedBody, headers: mergedHeaders, query: mergedQuery } =
+    const { body: mergedBody, headers: mergedHeaders } =
       mergePassthrough<Record<string, unknown>>(
         connectorBody,
         {
@@ -97,14 +97,10 @@ export class InfobipSmsConnector
       );
 
     const baseUrl = `https://${this.config.baseUrl}/sms/2/text/advanced`;
-    const finalUrl =
-      Object.keys(mergedQuery).length > 0
-        ? `${baseUrl}?${new URLSearchParams(mergedQuery).toString()}`
-        : baseUrl;
 
     let response: Response;
     try {
-      response = await this.fetchImpl(finalUrl, {
+      response = await this.fetchImpl(baseUrl, {
         method: 'POST',
         headers: mergedHeaders,
         body: JSON.stringify(mergedBody),

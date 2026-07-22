@@ -270,7 +270,7 @@ describe('FcmPushConnector', () => {
         expect(hook.getSpy).toHaveBeenCalledTimes(1);
         expect(hook.setSpy).toHaveBeenCalledTimes(1);
 
-        const stored = hook.store.get('fcm:test-project');
+        const stored = hook.store.get('fcm:test-project:test@test-project.iam.gserviceaccount.com');
         expect(stored).toBeDefined();
         expect(stored!.token).toBe('fresh-tk');
         // expiresAt must be ~Date.now() + 3599 * 1000 (give or take wall-clock drift).
@@ -284,7 +284,7 @@ describe('FcmPushConnector', () => {
       it('cache-hit: hook.get returns unexpired entry → reuses, NO token-exchange call, NO hook.set call', async () => {
         // Seed the cache via the constructor so setSpy starts at 0 (explicit key).
         const hook = createTokenCacheMock({
-          'fcm:test-project': {
+          'fcm:test-project:test@test-project.iam.gserviceaccount.com': {
             token: 'cached-token',
             expiresAt: Date.now() + 60_000,
           },
@@ -315,7 +315,7 @@ describe('FcmPushConnector', () => {
 
       it('cache-stale: hook.get returns expired entry → treats as miss, mints fresh, calls hook.set', async () => {
         const hook = createTokenCacheMock({
-          'fcm:test-project': {
+          'fcm:test-project:test@test-project.iam.gserviceaccount.com': {
             token: 'old-token',
             expiresAt: Date.now() - 1, // already expired
           },
@@ -337,7 +337,7 @@ describe('FcmPushConnector', () => {
         expect(mockFetch.mock.calls[0]![0]).toBe(OAUTH_URL);
 
         // Hook updated with the new token.
-        expect(hook.store.get('fcm:test-project')?.token).toBe('tk-new');
+        expect(hook.store.get('fcm:test-project:test@test-project.iam.gserviceaccount.com')?.token).toBe('tk-new');
         expect(hook.setSpy).toHaveBeenCalledTimes(1);
 
         // FCM call uses the freshly-minted token, not the stale one.
@@ -346,7 +346,7 @@ describe('FcmPushConnector', () => {
         expect(headers.Authorization).toBe('Bearer tk-new');
       });
 
-      it('cache key is exactly "fcm:" + projectId — no salt, no time component', async () => {
+      it('cache key is fcm:<projectId>:<clientEmail> — includes the service-account identity', async () => {
         const hook = createTokenCacheMock();
 
         mockFetch
@@ -356,12 +356,12 @@ describe('FcmPushConnector', () => {
         const connector = new FcmPushConnector(buildConfig({ tokenCache: hook }));
         await connector.send({ to: 'd', title: 't', body: 'b' });
 
-        expect(hook.getSpy).toHaveBeenCalledWith('fcm:test-project');
+        expect(hook.getSpy).toHaveBeenCalledWith('fcm:test-project:test@test-project.iam.gserviceaccount.com');
       });
 
       it('vendor rejects cached token (401): throws auth_failed; hook NOT evicted by wrapper', async () => {
         const hook = createTokenCacheMock({
-          'fcm:test-project': {
+          'fcm:test-project:test@test-project.iam.gserviceaccount.com': {
             token: 'stale-but-not-expired',
             expiresAt: Date.now() + 60_000,
           },
@@ -386,7 +386,7 @@ describe('FcmPushConnector', () => {
         // Wrapper did NOT call hook.set on auth-fail (consumer-owned eviction).
         expect(hook.setSpy.mock.calls.length).toBe(setCallsBefore);
         // Entry remains intact in the consumer's cache.
-        expect(hook.store.get('fcm:test-project')?.token).toBe('stale-but-not-expired');
+        expect(hook.store.get('fcm:test-project:test@test-project.iam.gserviceaccount.com')?.token).toBe('stale-but-not-expired');
       });
     });
 
@@ -551,6 +551,21 @@ describe('FcmPushConnector', () => {
         const e = err as ConnectorError;
         expect(e.providerCode).toBe('auth_failed');
       }
+    });
+
+    it('throws auth_failed when the OAuth exchange returns a 200 with no access_token (never Bearer undefined)', async () => {
+      // A garbage/token-less 200 must not flow through as `Bearer undefined`.
+      mockFetch.mockResolvedValueOnce(
+        new Response(JSON.stringify({ token_type: 'Bearer', expires_in: 3599 }), { status: 200 }),
+      );
+
+      const connector = new FcmPushConnector(buildConfig());
+      await expect(connector.send({ to: 'd', title: 't', body: 'b' })).rejects.toMatchObject({
+        name: 'ConnectorError',
+        providerCode: 'auth_failed',
+      });
+      // Only the OAuth call happened — no FCM send with a bogus bearer.
+      expect(mockFetch).toHaveBeenCalledTimes(1);
     });
   });
 

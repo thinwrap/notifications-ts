@@ -301,8 +301,10 @@ describe('MailtrapEmailConnector', () => {
         string,
         unknown
       >;
+      // Top-level fields are cased to snake_case; nested data-map keys
+      // (template_variables / custom_variables) pass through VERBATIM.
       expect(body.template_uuid).toBe('u1');
-      expect(body.template_variables).toEqual({ first_name: 'Alex' });
+      expect(body.template_variables).toEqual({ firstName: 'Alex' });
       expect(body.custom_variables).toEqual({ a: 1 });
       expect(body.category).toBe('transactional');
       expect(body.templateUuid).toBeUndefined();

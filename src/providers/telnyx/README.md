@@ -57,5 +57,5 @@ await tx.send({
 
 ## Vendor docs
 
-- API reference: https://developers.telnyx.com/docs/api/v2/messaging
-- Errors: https://developers.telnyx.com/docs/messaging/errors
+- API reference: https://developers.telnyx.com/docs/messaging/messages/send-message
+- Errors: https://developers.telnyx.com/docs/messaging/messages/error-codes/index

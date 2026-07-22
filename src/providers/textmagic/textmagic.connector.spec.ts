@@ -148,7 +148,7 @@ describe('TextmagicSmsConnector', () => {
       }
     });
 
-    it('honors `_passthrough` — body, headers, and query merged into the request', async () => {
+    it('honors `_passthrough` — body and headers merged into the request', async () => {
       mockFetch.mockResolvedValueOnce(sendSuccessResponse());
 
       await connector.send({
@@ -157,16 +157,13 @@ describe('TextmagicSmsConnector', () => {
         _passthrough: {
           body: { sendingTime: 1609459200 },
           headers: { 'X-Trace-Id': 't-1' },
-          query: { dry_run: 'true' },
         },
       });
 
       const [url, init] = mockFetch.mock.calls[0]!;
       const reqInit = init as RequestInit;
 
-      expect(url).toBe(
-        'https://rest.textmagic.com/api/v2/messages?dry_run=true',
-      );
+      expect(url).toBe('https://rest.textmagic.com/api/v2/messages');
       const params = new URLSearchParams(reqInit.body as string);
       expect(params.get('sendingTime')).toBe('1609459200');
       expect(params.get('phones')).toBe('+15559876543');

@@ -30,6 +30,10 @@ function buildConfig(overrides: Partial<ApnsConfig> = {}): ApnsConfig {
     privateKey: TEST_PRIVATE_KEY,
     bundleId: 'com.example.app',
     env: 'sandbox',
+    // APNs mandates HTTP/2; the connector fails fast when NO transport is injected
+    // (the built-in undici fetch is HTTP/1.1-only). Model a consumer supplying an
+    // HTTP/2-capable fetch by injecting the mock here.
+    fetch: mockFetch as unknown as typeof fetch,
     ...overrides,
   };
 }
@@ -64,6 +68,17 @@ describe('ApnsPushConnector', () => {
     const connector = new ApnsPushConnector(buildConfig());
     expect(connector.id).toBe('apns');
     expect(connector.channelType).toBe(ChannelTypeEnum.PUSH);
+  });
+
+  it('fails fast with invalid_request when no HTTP/2-capable transport is injected (APNs needs HTTP/2)', async () => {
+    // No fetch injected → the built-in undici fetch (HTTP/1.1-only) would be used,
+    // which APNs rejects. Surface a clear typed error up front, without a network call.
+    const connector = new ApnsPushConnector({ ...buildConfig(), fetch: undefined });
+    await expect(connector.send({ to: 'device-token', title: 't', body: 'b' })).rejects.toMatchObject({
+      name: 'ConnectorError',
+      providerCode: 'invalid_request',
+    });
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
   // ===========================================================================

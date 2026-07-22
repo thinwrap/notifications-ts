@@ -48,6 +48,11 @@ Mode-derived:
 
 HTTP/2 only. The `bundleId` is sent as the `apns-topic` header.
 
+> **You must supply an HTTP/2-capable transport.** APNs only accepts HTTP/2, but
+> Node's built-in `fetch` (undici) speaks HTTP/1.1. Calling `.send()` on the
+> default transport fails fast with `ConnectorError` (`providerCode:
+> 'invalid_request'`) — inject a `fetch` implementation that negotiates HTTP/2.
+
 ## Narrowed input augmentations
 
 Standard push input (`to`, `title`, `body`, `data` — the 4-field baseline).

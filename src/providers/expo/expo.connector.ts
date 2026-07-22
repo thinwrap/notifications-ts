@@ -87,21 +87,16 @@ export class ExpoPushConnector
       connectorHeaders.Authorization = `Bearer ${this.config.accessToken}`;
     }
 
-    const { body: mergedBody, headers: mergedHeaders, query: mergedQuery } =
+    const { body: mergedBody, headers: mergedHeaders } =
       mergePassthrough<Record<string, unknown>>(
         connectorBody,
         connectorHeaders,
         input._passthrough,
       );
 
-    const finalUrl =
-      Object.keys(mergedQuery).length > 0
-        ? `${EXPO_ENDPOINT}?${new URLSearchParams(mergedQuery).toString()}`
-        : EXPO_ENDPOINT;
-
     let response: Response;
     try {
-      response = await this.fetchImpl(finalUrl, {
+      response = await this.fetchImpl(EXPO_ENDPOINT, {
         method: 'POST',
         headers: mergedHeaders,
         body: JSON.stringify(mergedBody),

@@ -68,11 +68,8 @@ export class TextmagicSmsConnector
     if (input.cutExtra !== undefined)
       connectorBody.cutExtra = input.cutExtra ? '1' : '0';
 
-    const {
-      body: mergedBody,
-      headers: mergedHeaders,
-      query: mergedQuery,
-    } = mergePassthrough<Record<string, unknown>>(
+    const { body: mergedBody, headers: mergedHeaders } =
+      mergePassthrough<Record<string, unknown>>(
       connectorBody,
       {
         'Content-Type': 'application/x-www-form-urlencoded',
@@ -90,14 +87,9 @@ export class TextmagicSmsConnector
       formBody.append(key, String(value));
     }
 
-    const finalUrl =
-      Object.keys(mergedQuery).length > 0
-        ? `${TEXTMAGIC_ENDPOINT}?${new URLSearchParams(mergedQuery).toString()}`
-        : TEXTMAGIC_ENDPOINT;
-
     let response: Response;
     try {
-      response = await this.fetchImpl(finalUrl, {
+      response = await this.fetchImpl(TEXTMAGIC_ENDPOINT, {
         method: 'POST',
         headers: mergedHeaders,
         body: formBody.toString(),

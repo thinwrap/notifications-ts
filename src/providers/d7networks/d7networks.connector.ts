@@ -84,11 +84,8 @@ export class D7NetworksSmsConnector
       message_globals: messageGlobals,
     };
 
-    const {
-      body: mergedBody,
-      headers: mergedHeaders,
-      query: mergedQuery,
-    } = mergePassthrough<Record<string, unknown>>(
+    const { body: mergedBody, headers: mergedHeaders } =
+      mergePassthrough<Record<string, unknown>>(
       connectorBody,
       {
         'Content-Type': 'application/json',
@@ -98,10 +95,7 @@ export class D7NetworksSmsConnector
       input._passthrough,
     );
 
-    const url =
-      Object.keys(mergedQuery).length > 0
-        ? `${D7_ENDPOINT}?${new URLSearchParams(mergedQuery).toString()}`
-        : D7_ENDPOINT;
+    const url = D7_ENDPOINT;
 
     let response: Response;
     try {

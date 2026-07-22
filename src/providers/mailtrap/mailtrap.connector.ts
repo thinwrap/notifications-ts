@@ -80,6 +80,7 @@ export class MailtrapEmailConnector
         ? (transformKeys(
             input._passthrough.body as Record<string, unknown>,
             CasingEnum.SNAKE_CASE,
+            { deep: false },
           ) as Record<string, unknown>)
         : undefined;
     const normalizedPassthrough =
@@ -87,7 +88,7 @@ export class MailtrapEmailConnector
         ? { ...input._passthrough, body: normalizedPassthroughBody }
         : input._passthrough;
 
-    const { body: mergedBody, headers: mergedHeaders, query: mergedQuery } =
+    const { body: mergedBody, headers: mergedHeaders } =
       mergePassthrough<Record<string, unknown>>(
         connectorBody,
         {
@@ -98,13 +99,11 @@ export class MailtrapEmailConnector
         normalizedPassthrough,
       );
 
-    const queryString = buildQueryString(mergedQuery);
-    const fullUrl = `${url}${queryString}`;
     const serializedBody = JSON.stringify(mergedBody);
 
     let response: Response;
     try {
-      response = await this.fetchImpl(fullUrl, {
+      response = await this.fetchImpl(url, {
         method: 'POST',
         headers: mergedHeaders,
         body: serializedBody,
@@ -388,12 +387,6 @@ export class MailtrapEmailConnector
 // ---------------------------------------------------------------------------
 // Module-private helpers
 // ---------------------------------------------------------------------------
-
-function buildQueryString(query: Record<string, string>): string {
-  const keys = Object.keys(query);
-  if (keys.length === 0) return '';
-  return '?' + new URLSearchParams(query).toString();
-}
 
 /**
  * Map Mailtrap (HTTP status, errors[] array) to canonical `ProviderCode` per

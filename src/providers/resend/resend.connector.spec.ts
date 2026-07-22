@@ -268,21 +268,6 @@ describe('ResendEmailConnector', () => {
       expect(headers.Authorization).toBe('Bearer re_test_123');
     });
 
-    it('folds _passthrough.query into the URL', async () => {
-      mockFetch.mockResolvedValueOnce(resendSuccessResponse());
-
-      await connector.send({
-        from: 'sender@example.com',
-        to: 'r@example.com',
-        subject: 'Query',
-        text: 'plain',
-        _passthrough: { query: { trace: 'on' } },
-      });
-
-      const [url] = mockFetch.mock.calls[0]!;
-      expect(url).toBe('https://api.resend.com/emails?trace=on');
-    });
-
     // -------------------------------------------------------------------------
     // Error mapping table
     // -------------------------------------------------------------------------

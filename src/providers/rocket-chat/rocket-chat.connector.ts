@@ -11,6 +11,7 @@ import { ConnectorError } from '../../types';
 import type { ProviderCode } from '../../types';
 import { mergePassthrough } from '../../utils';
 import { parseRetryAfter } from '../../utils';
+import { redactSecrets, scrubTransportError } from '../../utils';
 import type { RocketChatConfig } from './rocket-chat.config';
 import type {
   RocketChatNarrowedInput,
@@ -80,7 +81,7 @@ export class RocketChatChatConnector
     if (input.tmid !== undefined) connectorBody.tmid = input.tmid;
     if (input.tshow !== undefined) connectorBody.tshow = input.tshow;
 
-    const { body: mergedBody, headers: mergedHeaders, query: mergedQuery } =
+    const { body: mergedBody, headers: mergedHeaders } =
       mergePassthrough<Record<string, unknown>>(
         connectorBody,
         { 'Content-Type': 'application/json' },
@@ -89,26 +90,29 @@ export class RocketChatChatConnector
 
     let response: Response;
     try {
-      const requestOptions: { headers: Record<string, string>; query?: Record<string, string> } = {
+      response = await this.sendPostJson(this.config.webhookUrl, mergedBody, {
         headers: mergedHeaders,
-      };
-      if (Object.keys(mergedQuery).length > 0) {
-        requestOptions.query = mergedQuery;
-      }
-      response = await this.sendPostJson(
-        this.config.webhookUrl,
-        mergedBody,
-        requestOptions,
-      );
+      });
     } catch (error) {
-      // sendPostJson already wraps network errors in ConnectorError per
-      // BaseConnector.invokeFetch — rethrow verbatim.
-      if (error instanceof ConnectorError) throw error;
+      // sendPostJson (BaseConnector.invokeFetch) wraps transport failures in a
+      // ConnectorError, but its message/cause can embed the webhook URL (the
+      // credential) when a BYO fetch leaks it. Redact the URL and scrub the raw
+      // error before surfacing.
+      if (error instanceof ConnectorError) {
+        throw new ConnectorError({
+          message: redactSecrets(error.message, [this.config.webhookUrl]),
+          statusCode: error.statusCode,
+          providerCode: error.providerCode,
+          cause: scrubTransportError(
+            (error.cause as { raw?: unknown })?.raw ?? error.cause,
+          ),
+        });
+      }
       throw new ConnectorError({
-        message: (error as Error).message ?? 'Network error',
+        message: redactSecrets((error as Error).message ?? 'Network error', [this.config.webhookUrl]),
         statusCode: null,
         providerCode: 'provider_unavailable',
-        cause: { raw: error },
+        cause: scrubTransportError(error),
       });
     }
 

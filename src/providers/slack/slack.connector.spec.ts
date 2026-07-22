@@ -111,6 +111,17 @@ describe('SlackChatConnector', () => {
       }
     });
 
+    it('rejects a cleartext http:// webhook URL (the URL is the credential)', async () => {
+      const httpConnector = new SlackChatConnector({
+        webhookUrl: 'http://hooks.slack.com/services/T00/B00/xxx',
+      });
+      await expect(httpConnector.send({ body: 'Hello!' })).rejects.toMatchObject({
+        providerCode: 'invalid_request',
+      });
+      // No request is made for a rejected URL.
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
     it('should throw ConnectorError on API error', async () => {
       mockFetch.mockResolvedValueOnce(
         new Response('invalid_token', { status: 403 })

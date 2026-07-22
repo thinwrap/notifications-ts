@@ -122,6 +122,7 @@ export class TwilioSmsConnector
         ? (transformKeys(
             input._passthrough.body as Record<string, unknown>,
             CasingEnum.PASCAL_CASE,
+            { deep: false },
           ) as Record<string, unknown>)
         : undefined;
     const normalizedPassthrough =
@@ -133,7 +134,7 @@ export class TwilioSmsConnector
       'Basic ' +
       encodeBase64Ascii(`${this.config.accountSid}:${this.config.authToken}`);
 
-    const { body: mergedBody, headers: mergedHeaders, query: mergedQuery } =
+    const { body: mergedBody, headers: mergedHeaders } =
       mergePassthrough<Record<string, unknown>>(
         connectorBody as unknown as Record<string, unknown>,
         {
@@ -144,8 +145,7 @@ export class TwilioSmsConnector
       );
 
     const host = TWILIO_BASE_HOSTS[this.config.region ?? 'us1'];
-    const queryString = buildQueryString(mergedQuery);
-    const url = `https://${host}/2010-04-01/Accounts/${this.config.accountSid}/Messages.json${queryString}`;
+    const url = `https://${host}/2010-04-01/Accounts/${this.config.accountSid}/Messages.json`;
 
     const response = await this.sendPostForm(url, mergedBody, {
       headers: mergedHeaders,
@@ -253,12 +253,6 @@ export class TwilioSmsConnector
 // ---------------------------------------------------------------------------
 // Module-private helpers
 // ---------------------------------------------------------------------------
-
-function buildQueryString(query: Record<string, string>): string {
-  const keys = Object.keys(query);
-  if (keys.length === 0) return '';
-  return '?' + new URLSearchParams(query).toString();
-}
 
 /**
  * Map Twilio (HTTP status, vendor `code`) to canonical `ProviderCode` per

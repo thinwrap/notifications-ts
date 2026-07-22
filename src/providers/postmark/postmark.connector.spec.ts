@@ -399,7 +399,9 @@ describe('PostmarkEmailConnector', () => {
         string,
         unknown
       >;
-      expect(body.TemplateModel).toEqual({ FirstName: 'Alex' });
+      // Top-level field is cased to PascalCase; the nested TemplateModel keys
+      // (template variables) pass through VERBATIM to match the placeholders.
+      expect(body.TemplateModel).toEqual({ firstName: 'Alex' });
       expect(body.templateModel).toBeUndefined();
     });
 
@@ -420,21 +422,6 @@ describe('PostmarkEmailConnector', () => {
       const headers = (init as RequestInit).headers as Record<string, string>;
       expect(headers['X-Custom-Header']).toBe('value');
       expect(headers['X-Postmark-Server-Token']).toBe('pm-test-token');
-    });
-
-    it('folds _passthrough.query into the URL', async () => {
-      mockFetch.mockResolvedValueOnce(postmarkSuccessResponse());
-
-      await connector.send({
-        from: 'sender@example.com',
-        to: 'r@example.com',
-        subject: 'q',
-        text: 't',
-        _passthrough: { query: { trace: 'on' } },
-      });
-
-      const [url] = mockFetch.mock.calls[0]!;
-      expect(url).toBe('https://api.postmarkapp.com/email?trace=on');
     });
 
     // -------------------------------------------------------------------------

@@ -56,11 +56,8 @@ export class MailgunEmailConnector
 
     const fields = this.buildMailgunFields(input);
 
-    const {
-      body: mergedBody,
-      headers: mergedHeaders,
-      query: mergedQuery,
-    } = mergePassthrough<Record<string, string>>(
+    const { body: mergedBody, headers: mergedHeaders } =
+      mergePassthrough<Record<string, string>>(
       fields,
       { Authorization: `Basic ${auth}` },
       input._passthrough,
@@ -76,7 +73,10 @@ export class MailgunEmailConnector
         input.tags,
       );
       requestBody = multipartBody;
-      contentType = `multipart/form-data; boundary=${boundary}`;
+      // The boundary contains `=` (a tspecial per RFC 2045), so the Content-Type
+      // parameter MUST be quoted — an unquoted `=` can confuse a strict multipart
+      // parser. (php/go use a `=`-free hex boundary and don't need quoting.)
+      contentType = `multipart/form-data; boundary="${boundary}"`;
     } else {
       const params = new URLSearchParams();
       for (const [key, value] of Object.entries(mergedBody)) {
@@ -92,12 +92,9 @@ export class MailgunEmailConnector
       contentType = 'application/x-www-form-urlencoded';
     }
 
-    const queryString = buildQueryString(mergedQuery);
-    const finalUrl = `${url}${queryString}`;
-
     let response: Response;
     try {
-      response = await this.fetchImpl(finalUrl, {
+      response = await this.fetchImpl(url, {
         method: 'POST',
         headers: { ...mergedHeaders, 'Content-Type': contentType },
         body: requestBody,
@@ -168,7 +165,11 @@ export class MailgunEmailConnector
     if (input.replyTo) fields['h:Reply-To'] = input.replyTo;
     if (input.headers) {
       for (const [name, value] of Object.entries(input.headers)) {
-        fields[`h:${name}`] = value;
+        // CRLF-strip the consumer-supplied header name before it becomes a
+        // form-field key — the key is later interpolated into a multipart
+        // Content-Disposition part header, where an embedded CR/LF would inject
+        // arbitrary part headers.
+        fields[`h:${stripCrlf(name)}`] = value;
       }
     }
 
@@ -264,7 +265,10 @@ export class MailgunEmailConnector
         options.attachments
       );
       requestBody = multipartBody;
-      contentType = `multipart/form-data; boundary=${boundary}`;
+      // The boundary contains `=` (a tspecial per RFC 2045), so the Content-Type
+      // parameter MUST be quoted — an unquoted `=` can confuse a strict multipart
+      // parser. (php/go use a `=`-free hex boundary and don't need quoting.)
+      contentType = `multipart/form-data; boundary="${boundary}"`;
     } else {
       const params = new URLSearchParams();
       for (const [key, value] of Object.entries(formFields)) {
@@ -334,7 +338,7 @@ export class MailgunEmailConnector
     for (const [key, value] of Object.entries(fields)) {
       parts.push(
         Buffer.from(
-          `--${boundary}\r\nContent-Disposition: form-data; name="${key}"\r\n\r\n${value}\r\n`,
+          `--${boundary}\r\nContent-Disposition: form-data; name="${escapeMimeFilename(key)}"\r\n\r\n${value}\r\n`,
         ),
       );
     }
@@ -396,7 +400,7 @@ export class MailgunEmailConnector
     for (const [key, value] of Object.entries(fields)) {
       parts.push(
         Buffer.from(
-          `--${boundary}\r\nContent-Disposition: form-data; name="${key}"\r\n\r\n${value}\r\n`
+          `--${boundary}\r\nContent-Disposition: form-data; name="${escapeMimeFilename(key)}"\r\n\r\n${value}\r\n`
         )
       );
     }
@@ -422,12 +426,6 @@ export class MailgunEmailConnector
 // ---------------------------------------------------------------------------
 // Module-private helpers
 // ---------------------------------------------------------------------------
-
-function buildQueryString(query: Record<string, string>): string {
-  const keys = Object.keys(query);
-  if (keys.length === 0) return '';
-  return '?' + new URLSearchParams(query).toString();
-}
 
 /**
  * Cryptographically-random suffix for multipart/form-data boundaries. Uses

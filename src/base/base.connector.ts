@@ -4,7 +4,14 @@ export abstract class BaseConnector {
   protected readonly fetchImpl: typeof fetch;
 
   protected constructor(fetchImpl?: typeof fetch) {
-    this.fetchImpl = fetchImpl ?? globalThis.fetch;
+    const baseFetch = fetchImpl ?? globalThis.fetch;
+    // Force `redirect: 'error'` on every request at the transport seam so a 3xx
+    // can never silently re-send credentials to the redirect target. `fetch`
+    // strips only `Authorization`/`Cookie` cross-origin, so custom credential
+    // headers (X-Postmark-Server-Token, api-key, X-Auth-Token, X-TM-*, …) would
+    // otherwise leak. No notification endpoint legitimately redirects a POST.
+    this.fetchImpl = ((input: Parameters<typeof fetch>[0], init?: RequestInit) =>
+      baseFetch(input, { ...init, redirect: 'error' })) as typeof fetch;
   }
 
   protected async sendPostJson(

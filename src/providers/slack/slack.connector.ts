@@ -12,6 +12,7 @@ import { ConnectorError } from '../../types';
 import type { ProviderCode } from '../../types';
 import { mergePassthrough } from '../../utils';
 import { parseRetryAfter } from '../../utils';
+import { redactSecrets, scrubTransportError } from '../../utils';
 import type { SlackConfig } from './slack.config';
 import type { SlackNarrowedInput } from './slack.types';
 
@@ -54,6 +55,17 @@ export class SlackChatConnector
       });
     }
 
+    if (!/^https:\/\//i.test(this.config.webhookUrl)) {
+      // The webhook URL IS the credential; refuse cleartext http so a
+      // stale/typo'd config cannot leak the token over the wire.
+      throw new ConnectorError({
+        message: 'Slack webhookUrl must be an https:// URL.',
+        statusCode: 400,
+        providerCode: 'invalid_request',
+        providerMessage: 'Slack webhookUrl must be an https:// URL.',
+      });
+    }
+
     const connectorBody: Record<string, unknown> = { text: input.body };
     if (input.blocks !== undefined) connectorBody.blocks = input.blocks;
     if (input.attachments !== undefined) connectorBody.attachments = input.attachments;
@@ -66,39 +78,39 @@ export class SlackChatConnector
     if (input.unfurlMedia !== undefined) connectorBody.unfurl_media = input.unfurlMedia;
     if (input.linkNames !== undefined) connectorBody.link_names = input.linkNames;
 
-    const { body: mergedBody, headers: mergedHeaders, query: mergedQuery } =
+    const { body: mergedBody, headers: mergedHeaders } =
       mergePassthrough<Record<string, unknown>>(
         connectorBody,
         { 'Content-Type': 'application/json' },
         input._passthrough,
       );
 
-    const finalUrl =
-      Object.keys(mergedQuery).length > 0
-        ? `${this.config.webhookUrl}?${new URLSearchParams(mergedQuery).toString()}`
-        : this.config.webhookUrl;
-
     let response: Response;
     try {
-      response = await this.fetchImpl(finalUrl, {
+      response = await this.fetchImpl(this.config.webhookUrl, {
         method: 'POST',
         headers: mergedHeaders,
         body: JSON.stringify(mergedBody),
       });
     } catch (error) {
-      if ((error as Error)?.name === 'AbortError') {
+      // The webhook URL IS the credential; redact it from any surfaced error
+      // text and never store the raw fetch error (a BYO fetch may embed the URL
+      // in the error message / nested fields).
+      const err = error as Error;
+      const cause = scrubTransportError(err);
+      if (err?.name === 'AbortError') {
         throw new ConnectorError({
-          message: (error as Error).message ?? 'Request cancelled',
+          message: redactSecrets(err.message ?? 'Request cancelled', [this.config.webhookUrl]),
           statusCode: null,
           providerCode: 'invalid_request',
-          cause: error,
+          cause,
         });
       }
       throw new ConnectorError({
-        message: (error as Error).message ?? 'Network error',
+        message: redactSecrets(err.message ?? 'Network error', [this.config.webhookUrl]),
         statusCode: null,
         providerCode: 'provider_unavailable',
-        cause: { raw: error },
+        cause,
       });
     }
 
@@ -202,19 +214,21 @@ export class SlackChatConnector
         body: JSON.stringify(body),
       });
     } catch (error) {
-      if ((error as Error)?.name === 'AbortError') {
+      const err = error as Error;
+      const cause = scrubTransportError(err);
+      if (err?.name === 'AbortError') {
         throw new ConnectorError({
-          message: (error as Error).message ?? 'Request cancelled',
+          message: redactSecrets(err.message ?? 'Request cancelled', [webhookUrl]),
           statusCode: null,
           providerCode: 'invalid_request',
-          cause: error,
+          cause,
         });
       }
       throw new ConnectorError({
-        message: (error as Error).message ?? 'Network error',
+        message: redactSecrets(err.message ?? 'Network error', [webhookUrl]),
         statusCode: null,
         providerCode: 'provider_unavailable',
-        cause: { raw: error },
+        cause,
       });
     }
 

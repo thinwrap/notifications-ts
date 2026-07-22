@@ -60,4 +60,4 @@ await os.send({
 ## Vendor docs
 
 - API reference: https://documentation.onesignal.com/reference/create-notification
-- Errors: https://documentation.onesignal.com/docs/api-rate-limits-and-errors
+- Errors: https://documentation.onesignal.com/reference/rate-limits

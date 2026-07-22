@@ -79,7 +79,7 @@ export class PlivoSmsConnector
       'Basic ' +
       encodeBase64Ascii(`${this.config.authId}:${this.config.authToken}`);
 
-    const { body: mergedBody, headers: mergedHeaders, query: mergedQuery } =
+    const { body: mergedBody, headers: mergedHeaders } =
       mergePassthrough<Record<string, unknown>>(
         connectorBody,
         {
@@ -89,11 +89,7 @@ export class PlivoSmsConnector
         input._passthrough,
       );
 
-    const baseUrl = `https://api.plivo.com/v1/Account/${this.config.authId}/Message/`;
-    const url =
-      Object.keys(mergedQuery).length > 0
-        ? `${baseUrl}?${new URLSearchParams(mergedQuery).toString()}`
-        : baseUrl;
+    const url = `https://api.plivo.com/v1/Account/${this.config.authId}/Message/`;
 
     let response: Response;
     try {

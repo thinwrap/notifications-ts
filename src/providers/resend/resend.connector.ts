@@ -36,7 +36,7 @@ export class ResendEmailConnector
   async send(input: EmailSendInput): Promise<EmailSendResult> {
     const requestBody = this.buildResendBody(input);
 
-    const { body: mergedBody, headers: mergedHeaders, query: mergedQuery } =
+    const { body: mergedBody, headers: mergedHeaders } =
       mergePassthrough<Record<string, unknown>>(
         requestBody,
         {
@@ -46,8 +46,7 @@ export class ResendEmailConnector
         input._passthrough,
       );
 
-    const queryString = buildQueryString(mergedQuery);
-    const url = `${RESEND_ENDPOINT}${queryString}`;
+    const url = RESEND_ENDPOINT;
     const serializedBody = JSON.stringify(mergedBody);
 
     let response: Response;
@@ -222,12 +221,6 @@ export class ResendEmailConnector
 // ---------------------------------------------------------------------------
 // Module-private helpers
 // ---------------------------------------------------------------------------
-
-function buildQueryString(query: Record<string, string>): string {
-  const keys = Object.keys(query);
-  if (keys.length === 0) return '';
-  return '?' + new URLSearchParams(query).toString();
-}
 
 function mapNetworkError(error: unknown): ConnectorError {
   if ((error as Error)?.name === 'AbortError') {

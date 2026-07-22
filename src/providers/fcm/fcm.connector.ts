@@ -62,7 +62,7 @@ export class FcmPushConnector
 
     const message = this.buildFcmMessage(input);
 
-    const { body: mergedBody, headers: mergedHeaders, query: mergedQuery } =
+    const { body: mergedBody, headers: mergedHeaders } =
       mergePassthrough<Record<string, unknown>>(
         { message } as unknown as Record<string, unknown>,
         {
@@ -72,9 +72,7 @@ export class FcmPushConnector
         input._passthrough,
       );
 
-    const url =
-      `https://fcm.googleapis.com/v1/projects/${this.config.projectId}/messages:send` +
-      buildQueryString(mergedQuery);
+    const url = `https://fcm.googleapis.com/v1/projects/${this.config.projectId}/messages:send`;
 
     let response: Response;
     try {
@@ -126,12 +124,14 @@ export class FcmPushConnector
    * - `tokenCache.get()` returns null or a stale entry: mint fresh, then call
    *   `set(key, accessToken, Date.now() + expiresIn * 1000)`.
    *
-   * The cache key is exactly `'fcm:' + projectId` — deterministic per-config,
-   * not per-clientEmail. Vendor-rejection-of-cached-token eviction is the
+   * The cache key is `'fcm:' + projectId + ':' + clientEmail` — the
+   * service-account identity is part of the key so two configs for the same
+   * project with different service accounts (sharing one `tokenCache`) never
+   * serve each other's tokens. Vendor-rejection-of-cached-token eviction is the
    * consumer's responsibility (the wrapper holds no state).
    */
   private async getAccessTokenViaHookOrFresh(): Promise<string> {
-    const cacheKey = `${TOKEN_CACHE_KEY_PREFIX}${this.config.projectId}`;
+    const cacheKey = `${TOKEN_CACHE_KEY_PREFIX}${this.config.projectId}:${this.config.clientEmail}`;
 
     if (this.config.tokenCache) {
       const cached = await this.config.tokenCache.get(cacheKey);
@@ -479,7 +479,9 @@ export class FcmPushConnector
     }
 
     if (fcmOptions) {
-      message.fcmOptions = fcmOptions;
+      // FCM HTTP v1 expects snake_case `fcm_options` (the native send() path
+      // emits the same). camelCase `fcmOptions` is ignored by FCM → 400.
+      message.fcm_options = fcmOptions;
     }
 
     if (webpush) {
@@ -507,12 +509,6 @@ export class FcmPushConnector
 // ---------------------------------------------------------------------------
 // Module-private helpers
 // ---------------------------------------------------------------------------
-
-function buildQueryString(query: Record<string, string>): string {
-  const keys = Object.keys(query);
-  if (keys.length === 0) return '';
-  return '?' + new URLSearchParams(query).toString();
-}
 
 /**
  * Map FCM HTTP v1 (HTTP status, error.status string) to canonical `ProviderCode`.

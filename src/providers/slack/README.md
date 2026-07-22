@@ -19,7 +19,7 @@ const sl = new Chat('slack', {
 
 ## Auth setup
 
-Create an Incoming Webhook at https://api.slack.com/messaging/webhooks. The
+Create an Incoming Webhook at https://docs.slack.dev/messaging/sending-messages-using-incoming-webhooks. The
 URL itself is the credential — anyone with it can post to the destination
 channel. Treat as a secret.
 
@@ -62,6 +62,6 @@ await sl.send({
 
 ## Vendor docs
 
-- API reference: https://api.slack.com/messaging/webhooks
-- Block Kit: https://api.slack.com/block-kit
-- Errors: https://api.slack.com/messaging/webhooks#handling_errors
+- API reference: https://docs.slack.dev/messaging/sending-messages-using-incoming-webhooks
+- Block Kit: https://docs.slack.dev/block-kit/
+- Errors: https://docs.slack.dev/messaging/sending-messages-using-incoming-webhooks

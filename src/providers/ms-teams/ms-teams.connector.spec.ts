@@ -264,6 +264,24 @@ describe('MsTeamsChatConnector', () => {
       }
     });
 
+    it('HTTP 200 with a masked error body (throttling) → error, not success', async () => {
+      // Teams returns 200 with an error string when throttled; the embedded
+      // HTTP code drives the taxonomy (429 → rate_limited).
+      mockFetch.mockResolvedValueOnce(
+        new Response(
+          'Microsoft Teams endpoint returned HTTP error 429 with ContextId abc.',
+          { status: 200 },
+        ),
+      );
+
+      try {
+        await connector.send({ body: 'hi' });
+        expect.unreachable('Should have thrown');
+      } catch (err) {
+        expect((err as ConnectorError).providerCode).toBe('rate_limited');
+      }
+    });
+
     it('429 + Retry-After: 30 → rate_limited with cause.retryAfter + cause.retryAfterSeconds', async () => {
       mockFetch.mockResolvedValueOnce(
         createRetryAfterFixture({

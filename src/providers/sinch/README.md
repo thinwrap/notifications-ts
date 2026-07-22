@@ -63,4 +63,4 @@ await sn.send({
 ## Vendor docs
 
 - API reference: https://developers.sinch.com/docs/sms/api-reference/sms/tag/Batches
-- EU endpoint: https://developers.sinch.com/docs/sms/getting-started/regions
+- EU endpoint: https://developers.sinch.com/docs/sms/api-reference

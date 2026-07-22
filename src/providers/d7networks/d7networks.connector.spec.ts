@@ -258,7 +258,7 @@ describe('D7NetworksSmsConnector', () => {
       }
     });
 
-    it('merges _passthrough.body, _passthrough.headers, and _passthrough.query into the request', async () => {
+    it('merges _passthrough.body and _passthrough.headers into the request', async () => {
       mockFetch.mockResolvedValueOnce(successResponse());
 
       await connector.send({
@@ -267,16 +267,13 @@ describe('D7NetworksSmsConnector', () => {
         _passthrough: {
           body: { custom_top_level: 'x' },
           headers: { 'X-Trace-Id': 't-1' },
-          query: { dry_run: 'true' },
         },
       });
 
       const [url, init] = mockFetch.mock.calls[0]!;
       const reqInit = init as RequestInit;
 
-      expect(url).toBe(
-        'https://api.d7networks.com/messages/v1/send?dry_run=true',
-      );
+      expect(url).toBe('https://api.d7networks.com/messages/v1/send');
       const body = JSON.parse(reqInit.body as string) as Record<string, unknown>;
       expect(body.custom_top_level).toBe('x');
       expect(body.messages).toBeDefined();

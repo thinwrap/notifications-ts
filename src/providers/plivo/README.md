@@ -56,5 +56,5 @@ await pl.send({
 
 ## Vendor docs
 
-- API reference: https://www.plivo.com/docs/sms/api/message
-- Errors: https://www.plivo.com/docs/sms/api/error-codes
+- API reference: https://www.plivo.com/docs/messaging/api/message/send-a-message
+- Errors: https://www.plivo.com/docs/messaging/troubleshooting/error-codes

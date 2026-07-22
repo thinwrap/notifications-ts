@@ -74,6 +74,6 @@ await mg.send({
 
 ## Vendor docs
 
-- API reference: https://documentation.mailgun.com/en/latest/api-sending.html
-- Regions: https://documentation.mailgun.com/en/latest/api-intro.html#mailgun-regions
-- Rate limits: https://documentation.mailgun.com/en/latest/api-rate-limit.html
+- API reference: https://documentation.mailgun.com/docs/mailgun/api-reference/send/mailgun/messages
+- Regions: https://documentation.mailgun.com/docs/mailgun/api-reference/api-overview
+- Rate limits: https://documentation.mailgun.com/docs/mailgun/api-reference/api-overview

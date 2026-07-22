@@ -11,7 +11,7 @@ import type {
 import { ChannelTypeEnum } from '../../types';
 import { ConnectorError } from '../../types';
 import type { ProviderCode } from '../../types';
-import { mergePassthrough } from '../../utils';
+import { mergeHeaders, mergePassthrough } from '../../utils';
 import { parseRetryAfter } from '../../utils';
 import type { SnsConfig } from './sns.config';
 import type { SnsMessageAttribute, SnsNarrowedInput } from './sns.types';
@@ -129,7 +129,11 @@ export class SnsSmsConnector
       // in the signature; subsequent AWS-managed headers replace any collisions.
       response = await this.fetchImpl(`https://${host}${path}`, {
         method: 'POST',
-        headers: { ...mergedHeaders, ...signedHeaders },
+        // Case-insensitive merge: a signed header must REPLACE any case-variant a
+        // consumer set via passthrough (e.g. `content-type` vs `Content-Type`).
+        // A plain spread would keep both keys — the wire value could then differ
+        // from the signed value → SignatureDoesNotMatch.
+        headers: mergeHeaders(mergedHeaders, signedHeaders),
         body: serializedBody,
       });
     } catch (error) {
@@ -245,11 +249,13 @@ export class SnsSmsConnector
     try {
       response = await this.fetchImpl(`https://${host}/`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          ...passthroughHeaders,
-          ...signedHeaders,
-        },
+        // Case-insensitive merge so a signed header replaces any case-variant from
+        // passthrough (see the other request path) — a plain spread would leave a
+        // duplicate whose wire value could diverge from the signature.
+        headers: mergeHeaders(
+          mergeHeaders({ 'Content-Type': 'application/x-www-form-urlencoded' }, passthroughHeaders),
+          signedHeaders,
+        ),
         body: serializedBody,
       });
     } catch (error) {

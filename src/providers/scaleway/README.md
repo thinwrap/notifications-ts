@@ -39,7 +39,7 @@ Generate an API key (Access key + Secret key) under Scaleway IAM. Only the
 
 The region is part of the URL path (not a host swap).
 
-## Wire mapping
+## Narrowed input augmentations
 
 | Thinwrap input | Scaleway wire field |
 |---|---|

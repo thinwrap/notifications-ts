@@ -68,7 +68,7 @@ export class PusherBeamsPushConnector
       Authorization: `Bearer ${this.config.secretKey}`,
     };
 
-    const { body: mergedBody, headers: mergedHeaders, query: mergedQuery } =
+    const { body: mergedBody, headers: mergedHeaders } =
       mergePassthrough<Record<string, unknown>>(
         connectorBody,
         connectorHeaders,
@@ -81,14 +81,10 @@ export class PusherBeamsPushConnector
       `https://${this.config.instanceId}.pushnotifications.pusher.com` +
       `/publish_api/v1/instances/${this.config.instanceId}` +
       `/publishes/${endpointSuffix}`;
-    const finalUrl =
-      Object.keys(mergedQuery).length > 0
-        ? `${baseUrl}?${new URLSearchParams(mergedQuery).toString()}`
-        : baseUrl;
 
     let response: Response;
     try {
-      response = await this.fetchImpl(finalUrl, {
+      response = await this.fetchImpl(baseUrl, {
         method: 'POST',
         headers: mergedHeaders,
         body: JSON.stringify(mergedBody),

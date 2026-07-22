@@ -61,5 +61,5 @@ await v.send({
 
 ## Vendor docs
 
-- API reference: https://developer.vonage.com/api/sms
-- Error codes: https://developer.vonage.com/api/sms#errors
+- API reference: https://developer.vonage.com/en/api/sms
+- Error codes: https://developer.vonage.com/en/api/sms#errors

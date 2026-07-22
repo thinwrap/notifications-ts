@@ -52,6 +52,7 @@ export class SendgridEmailConnector
         ? (transformKeys(
             input._passthrough.body as Record<string, unknown>,
             CasingEnum.SNAKE_CASE,
+            { deep: false },
           ) as Record<string, unknown>)
         : undefined;
     const normalizedPassthrough =
@@ -59,7 +60,7 @@ export class SendgridEmailConnector
         ? { ...input._passthrough, body: normalizedPassthroughBody }
         : input._passthrough;
 
-    const { body: mergedBody, headers: mergedHeaders, query: mergedQuery } =
+    const { body: mergedBody, headers: mergedHeaders } =
       mergePassthrough<Record<string, unknown>>(
         connectorBody,
         {
@@ -69,8 +70,7 @@ export class SendgridEmailConnector
         normalizedPassthrough,
       );
 
-    const queryString = buildQueryString(mergedQuery);
-    const url = `${SENDGRID_ENDPOINT}${queryString}`;
+    const url = SENDGRID_ENDPOINT;
     const serializedBody = JSON.stringify(mergedBody);
 
     let response: Response;
@@ -309,12 +309,6 @@ export class SendgridEmailConnector
 // ---------------------------------------------------------------------------
 // Module-private helpers
 // ---------------------------------------------------------------------------
-
-function buildQueryString(query: Record<string, string>): string {
-  const keys = Object.keys(query);
-  if (keys.length === 0) return '';
-  return '?' + new URLSearchParams(query).toString();
-}
 
 /**
  * Map SendGrid (HTTP status, errors[0]) to canonical `ProviderCode` per Story

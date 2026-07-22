@@ -15,7 +15,7 @@ import type {
 import { ChannelTypeEnum, CheckIntegrationResponseEnum } from '../../types';
 import { ConnectorError } from '../../types';
 import type { ProviderCode } from '../../types';
-import { mergePassthrough } from '../../utils';
+import { mergePassthrough, mergeHeaders } from '../../utils';
 import { parseRetryAfter } from '../../utils';
 import { encodeBase64Utf8, encodeBase64Bytes } from '../../utils';
 import { stripCrlf, quoteMimeFilename } from '../../utils';
@@ -89,7 +89,7 @@ export class SesEmailConnector
       // in the signature; subsequent AWS-managed headers replace any collisions.
       response = await this.fetchImpl(`https://${host}${path}`, {
         method: 'POST',
-        headers: { ...mergedHeaders, ...signedHeaders },
+        headers: mergeHeaders(mergedHeaders, signedHeaders),
         body: serializedBody,
       });
     } catch (error) {
@@ -154,7 +154,8 @@ export class SesEmailConnector
 
     if (input.attachments && input.attachments.length > 0) {
       const mimeMessage = this.buildMimeMessageFromInput(
-        fromEmailAddress,
+        senderName,
+        fromAddress,
         input.to,
         input.cc,
         input.bcc,
@@ -163,6 +164,7 @@ export class SesEmailConnector
         input.html ?? '',
         input.text,
         input.attachments,
+        input.headers,
       );
       content = {
         Raw: {
@@ -183,12 +185,23 @@ export class SesEmailConnector
         body.Text = { Data: input.text, Charset: 'UTF-8' };
       }
 
-      content = {
-        Simple: {
-          Subject: { Data: input.subject, Charset: 'UTF-8' },
-          Body: body,
-        },
+      const simple: {
+        Subject: { Data: string; Charset: string };
+        Body: typeof body;
+        Headers?: Array<{ Name: string; Value: string }>;
+      } = {
+        Subject: { Data: input.subject, Charset: 'UTF-8' },
+        Body: body,
       };
+      // SES v2 Simple content supports a Headers list — carry input.headers here
+      // instead of silently dropping them (was lost unless attachments forced raw).
+      if (input.headers && Object.keys(input.headers).length > 0) {
+        simple.Headers = Object.entries(input.headers).map(([Name, Value]) => ({
+          Name,
+          Value: stripCrlf(Value),
+        }));
+      }
+      content = { Simple: simple };
     }
 
     const requestBody: SesV2SendEmailRequest = {
@@ -272,7 +285,8 @@ export class SesEmailConnector
    * ReplyTo headers are RFC 2047 base64-encoded.
    */
   private buildMimeMessageFromInput(
-    from: string,
+    fromName: string | undefined,
+    fromAddress: string,
     to: string,
     cc: string[] | undefined,
     bcc: string[] | undefined,
@@ -281,13 +295,14 @@ export class SesEmailConnector
     html: string,
     text: string | undefined,
     attachments: EmailAttachment[],
+    customHeaders?: Record<string, string>,
   ): string {
     const boundary = `----=_Part_${randomBoundarySuffix()}`;
     const altBoundary = `----=_Alt_${randomBoundarySuffix()}`;
 
     const lines: string[] = [];
 
-    lines.push(`From: ${encodeHeaderValue(from)}`);
+    lines.push(`From: ${formatMimeFrom(fromName, fromAddress)}`);
     lines.push(`To: ${stripCrlf(to)}`);
 
     if (cc && cc.length > 0) {
@@ -303,6 +318,20 @@ export class SesEmailConnector
     }
 
     lines.push(`Subject: ${encodeHeaderValue(subject)}`);
+
+    // Consumer `input.headers` — emit them so the raw path doesn't silently drop
+    // them. Skip names the connector already controls (case-insensitive) to avoid
+    // duplicate/conflicting MIME headers; CRLF-strip both name and value.
+    if (customHeaders) {
+      const reserved = new Set([
+        'from', 'to', 'cc', 'bcc', 'reply-to', 'subject', 'mime-version', 'content-type',
+      ]);
+      for (const [name, value] of Object.entries(customHeaders)) {
+        if (reserved.has(name.toLowerCase())) continue;
+        lines.push(`${stripCrlf(name)}: ${stripCrlf(value)}`);
+      }
+    }
+
     lines.push('MIME-Version: 1.0');
     lines.push(`Content-Type: multipart/mixed; boundary="${boundary}"`);
     lines.push('');
@@ -311,21 +340,25 @@ export class SesEmailConnector
     lines.push(`Content-Type: multipart/alternative; boundary="${altBoundary}"`);
     lines.push('');
 
+    // Body parts are base64-encoded (not 8bit): SES honors SMTP's 7-bit limit
+    // and mangles 8-bit content if it rewrites the message (open/click
+    // tracking); an unfolded 8bit line also violates the 998-octet line cap for
+    // minified HTML. base64 is the RFC-/AWS-sanctioned 7-bit-safe encoding.
     if (text) {
       lines.push(`--${altBoundary}`);
       lines.push('Content-Type: text/plain; charset=UTF-8');
-      lines.push('Content-Transfer-Encoding: 8bit');
+      lines.push('Content-Transfer-Encoding: base64');
       lines.push('');
-      lines.push(text);
+      lines.push(wrapBase64(encodeBase64Utf8(text)));
       lines.push('');
     }
 
     if (html) {
       lines.push(`--${altBoundary}`);
       lines.push('Content-Type: text/html; charset=UTF-8');
-      lines.push('Content-Transfer-Encoding: 8bit');
+      lines.push('Content-Transfer-Encoding: base64');
       lines.push('');
-      lines.push(html);
+      lines.push(wrapBase64(encodeBase64Utf8(html)));
       lines.push('');
     }
 
@@ -397,7 +430,8 @@ export class SesEmailConnector
 
     if (options.attachments && options.attachments.length > 0) {
       const mimeMessage = this.buildMimeMessage(
-        fromEmailAddress,
+        senderName,
+        from,
         options.to,
         options.cc,
         options.bcc,
@@ -472,11 +506,10 @@ export class SesEmailConnector
         `https://${host}/v2/email/outbound-emails`,
         {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...mergedHeaders,
-            ...signedHeaders,
-          },
+          headers: mergeHeaders(
+            { 'Content-Type': 'application/json', ...mergedHeaders },
+            signedHeaders,
+          ),
           body: serializedBody,
         }
       );
@@ -537,7 +570,8 @@ export class SesEmailConnector
   }
 
   private buildMimeMessage(
-    from: string,
+    fromName: string | undefined,
+    fromAddress: string,
     to: string[],
     cc: string[] | undefined,
     bcc: string[] | undefined,
@@ -552,7 +586,7 @@ export class SesEmailConnector
 
     const lines: string[] = [];
 
-    lines.push(`From: ${encodeHeaderValue(from)}`);
+    lines.push(`From: ${formatMimeFrom(fromName, fromAddress)}`);
     lines.push(`To: ${to.map(stripCrlf).join(', ')}`);
 
     if (cc && cc.length > 0) {
@@ -579,17 +613,17 @@ export class SesEmailConnector
     if (text) {
       lines.push(`--${altBoundary}`);
       lines.push('Content-Type: text/plain; charset=UTF-8');
-      lines.push('Content-Transfer-Encoding: 8bit');
+      lines.push('Content-Transfer-Encoding: base64');
       lines.push('');
-      lines.push(text);
+      lines.push(wrapBase64(encodeBase64Utf8(text)));
       lines.push('');
     }
 
     lines.push(`--${altBoundary}`);
     lines.push('Content-Type: text/html; charset=UTF-8');
-    lines.push('Content-Transfer-Encoding: 8bit');
+    lines.push('Content-Transfer-Encoding: base64');
     lines.push('');
-    lines.push(html);
+    lines.push(wrapBase64(encodeBase64Utf8(html)));
     lines.push('');
 
     lines.push(`--${altBoundary}--`);
@@ -810,6 +844,20 @@ function rfc3986Encode(value: string): string {
     /[!'()*]/g,
     (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase(),
   );
+}
+
+/**
+ * Build an RFC 5322 `From` header value from an optional display name and a
+ * bare addr-spec. ONLY the display-name phrase is RFC 2047 encoded-word encoded
+ * (and only when non-ASCII); the `<addr@domain>` is kept bare so the header
+ * stays a parseable mailbox. RFC 2047-encoding the whole `"Name <addr>"` as a
+ * single encoded-word (the previous behaviour) swallowed the addr-spec, leaving
+ * a `From` with no usable address — SES then rejects the raw message.
+ */
+function formatMimeFrom(name: string | undefined, addr: string): string {
+  const bareAddr = stripCrlf(addr);
+  if (!name) return bareAddr;
+  return `${encodeHeaderValue(name)} <${bareAddr}>`;
 }
 
 /**

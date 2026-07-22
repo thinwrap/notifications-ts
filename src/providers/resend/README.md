@@ -67,5 +67,5 @@ await r.send({
 ## Vendor docs
 
 - API reference: https://resend.com/docs/api-reference/emails/send-email
-- Idempotency: https://resend.com/docs/api-reference/idempotency
+- Idempotency: https://resend.com/docs/dashboard/emails/idempotency-keys
 - Rate limits: https://resend.com/docs/api-reference/rate-limit

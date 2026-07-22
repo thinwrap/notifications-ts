@@ -298,7 +298,7 @@ describe('InfobipSmsConnector', () => {
       }
     });
 
-    it('merges _passthrough.body, _passthrough.headers, and _passthrough.query into the request', async () => {
+    it('merges _passthrough.body and _passthrough.headers into the request', async () => {
       mockFetch.mockResolvedValueOnce(successResponse());
 
       await connector.send({
@@ -307,16 +307,13 @@ describe('InfobipSmsConnector', () => {
         _passthrough: {
           body: { customField: 'x' },
           headers: { 'X-Trace-Id': 't-1' },
-          query: { dryRun: 'true' },
         },
       });
 
       const [url, init] = mockFetch.mock.calls[0]!;
       const reqInit = init as RequestInit;
 
-      expect(url).toBe(
-        'https://abc123.api.infobip.com/sms/2/text/advanced?dryRun=true',
-      );
+      expect(url).toBe('https://abc123.api.infobip.com/sms/2/text/advanced');
       const body = JSON.parse(reqInit.body as string) as Record<string, unknown>;
       expect(body.customField).toBe('x');
       expect(body.messages).toBeDefined();

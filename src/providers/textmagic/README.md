@@ -58,5 +58,5 @@ await tm.send({
 
 ## Vendor docs
 
-- API reference: https://docs.textmagic.com/#operation/sendMessage
+- API reference: https://docs.textmagic.com/#tag/Outbound-Messages/operation/sendMessage
 - Auth: https://docs.textmagic.com/#section/Authentication

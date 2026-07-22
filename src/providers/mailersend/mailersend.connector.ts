@@ -54,6 +54,7 @@ export class MailerSendEmailConnector
         ? (transformKeys(
             input._passthrough.body as Record<string, unknown>,
             CasingEnum.SNAKE_CASE,
+            { deep: false },
           ) as Record<string, unknown>)
         : undefined;
     const normalizedPassthrough =
@@ -61,7 +62,7 @@ export class MailerSendEmailConnector
         ? { ...input._passthrough, body: normalizedPassthroughBody }
         : input._passthrough;
 
-    const { body: mergedBody, headers: mergedHeaders, query: mergedQuery } =
+    const { body: mergedBody, headers: mergedHeaders } =
       mergePassthrough<Record<string, unknown>>(
         connectorBody,
         {
@@ -72,8 +73,7 @@ export class MailerSendEmailConnector
         normalizedPassthrough,
       );
 
-    const queryString = buildQueryString(mergedQuery);
-    const url = `${MAILERSEND_ENDPOINT}${queryString}`;
+    const url = MAILERSEND_ENDPOINT;
     const serializedBody = JSON.stringify(mergedBody);
 
     let response: Response;
@@ -311,12 +311,6 @@ export class MailerSendEmailConnector
 // ---------------------------------------------------------------------------
 // Module-private helpers
 // ---------------------------------------------------------------------------
-
-function buildQueryString(query: Record<string, string>): string {
-  const keys = Object.keys(query);
-  if (keys.length === 0) return '';
-  return '?' + new URLSearchParams(query).toString();
-}
 
 /**
  * Map MailerSend (HTTP status, error body) to canonical `ProviderCode` per

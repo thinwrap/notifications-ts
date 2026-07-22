@@ -39,6 +39,9 @@ export interface SesV2SendEmailRequest {
             Html?: { Data: string; Charset?: string };
             Text?: { Data: string; Charset?: string };
           };
+          // SES v2 Message.Headers — custom email headers (max 15). Lets the
+          // Simple path carry `input.headers` without falling back to raw MIME.
+          Headers?: Array<{ Name: string; Value: string }>;
         };
       }
     | {

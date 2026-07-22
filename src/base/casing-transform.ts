@@ -55,15 +55,23 @@ const casingFunctions: Record<CasingEnum, (key: string) => string> = {
 
 export function transformKeys(
   obj: Record<string, unknown>,
-  casing: CasingEnum
+  casing: CasingEnum,
+  options: { deep?: boolean } = {}
 ): Record<string, unknown> {
+  // `deep` defaults to true for backward compatibility of this public helper.
+  // Connectors normalizing `_passthrough.body` MUST pass `deep: false`: nested
+  // objects there are data-carrying maps (e.g. SendGrid `dynamic_template_data`,
+  // SparkPost `substitution_data`, Postmark `templateModel`) whose keys are the
+  // consumer's data and must pass VERBATIM — recursing would silently rename
+  // template variables / metadata keys.
+  const { deep = true } = options;
   const transform = casingFunctions[casing];
   const result: Record<string, unknown> = {};
 
   for (const [key, value] of Object.entries(obj)) {
     const newKey = transform(key);
-    if (value !== null && typeof value === 'object' && !Array.isArray(value) && !(typeof Buffer !== 'undefined' && value instanceof Buffer)) {
-      result[newKey] = transformKeys(value as Record<string, unknown>, casing);
+    if (deep && value !== null && typeof value === 'object' && !Array.isArray(value) && !(typeof Buffer !== 'undefined' && value instanceof Buffer)) {
+      result[newKey] = transformKeys(value as Record<string, unknown>, casing, options);
     } else {
       result[newKey] = value;
     }

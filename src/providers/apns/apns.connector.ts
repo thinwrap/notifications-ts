@@ -34,8 +34,38 @@ export class ApnsPushConnector
   // No instance state for tokens — the wrapper holds no state,
   // caching lives in the consumer-supplied `config.tokenCache` hook only.
 
+  /**
+   * True when NO transport was injected — i.e. we fall back to the built-in
+   * `globalThis.fetch` (undici), which speaks HTTP/1.1 only. APNs mandates
+   * HTTP/2, so that combination can never succeed; we fail fast (below) rather
+   * than emit an opaque transport error. A consumer-injected `fetch` may be
+   * HTTP/2-capable, so we do NOT block that case.
+   */
+  private readonly usesDefaultTransport: boolean;
+
   constructor(private config: ApnsConfig, fetchImpl?: typeof fetch) {
     super(fetchImpl ?? config.fetch);
+    this.usesDefaultTransport = fetchImpl === undefined && config.fetch === undefined;
+  }
+
+  /**
+   * APNs requires HTTP/2. Node's built-in `fetch` (undici) is HTTP/1.1-only, so
+   * if the consumer injected no `fetch` we cannot succeed — surface a clear,
+   * typed error up front instead of a confusing network failure mid-request.
+   */
+  private assertHttp2Transport(): void {
+    if (this.usesDefaultTransport) {
+      const message =
+        'APNs requires HTTP/2, but no HTTP/2-capable transport was provided. ' +
+        "Node's built-in fetch (undici) speaks only HTTP/1.1. Pass an HTTP/2-capable " +
+        '`fetch` via ApnsConfig.fetch (e.g. one backed by an HTTP/2 client).';
+      throw new ConnectorError({
+        message,
+        statusCode: null,
+        providerCode: 'invalid_request',
+        providerMessage: message,
+      });
+    }
   }
 
   /**
@@ -48,9 +78,11 @@ export class ApnsPushConnector
    *   2. POST to `https://api.push.apple.com/3/device/<token>` (prod) or
    *      `https://api.sandbox.push.apple.com/3/device/<token>` (sandbox).
    *
-   * HTTP/2: APNs requires HTTP/2. Node 18+ `fetch` (undici) negotiates HTTP/2
-   * via ALPN automatically when the server supports it (Path A). This keeps
-   * APNs on the BYO-fetch contract.
+   * HTTP/2: APNs requires HTTP/2. Node's built-in `fetch` (undici) is
+   * HTTP/1.1-ONLY — it does NOT transparently negotiate HTTP/2 — so a consumer
+   * that injects no `fetch` cannot reach APNs; `assertHttp2Transport()` fails
+   * fast in that case. An HTTP/2-capable `fetch` must be provided via
+   * `ApnsConfig.fetch` (BYO-fetch contract).
    *
    * Single-recipient enforcement: `input.to` is the device token.
    *
@@ -59,6 +91,7 @@ export class ApnsPushConnector
    * does NOT evict the hook cache — eviction is the consumer's responsibility.
    */
   async send(input: ApnsPushSendInput): Promise<PushSendResult> {
+    this.assertHttp2Transport();
     const jwt = await this.getJwtViaHookOrFresh();
 
     const wireBody = this.buildApnsBody(input);
@@ -197,8 +230,14 @@ export class ApnsPushConnector
     const payload: ApnsPayload = { aps };
 
     if (input.data) {
-      // APNs spec: custom data keys merge at the root of the payload, alongside `aps`.
-      Object.assign(payload, input.data);
+      // APNs spec: custom data keys merge at the root of the payload, alongside
+      // `aps`. Guard the reserved `aps` key so consumer data can never clobber
+      // the constructed alert/badge/sound dict (use `_passthrough` to shape aps).
+      const { aps: _reservedAps, ...customData } = input.data as Record<
+        string,
+        unknown
+      >;
+      Object.assign(payload, customData);
     }
 
     return payload;
@@ -299,6 +338,7 @@ export class ApnsPushConnector
     options: IPushOptions,
     bridgeProviderData: WithPassthrough<Record<string, unknown>> = {},
   ): Promise<ISendMessageSuccessResponse> {
+    this.assertHttp2Transport();
     const jwt = createApnsJwt(
       this.config.keyId,
       this.config.teamId,

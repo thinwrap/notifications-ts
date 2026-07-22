@@ -76,7 +76,7 @@ export class MessageBirdSmsConnector
     if (input.scheduledDatetime !== undefined)
       connectorBody.scheduledDatetime = input.scheduledDatetime;
 
-    const { body: mergedBody, headers: mergedHeaders, query: mergedQuery } =
+    const { body: mergedBody, headers: mergedHeaders } =
       mergePassthrough<Record<string, unknown>>(
         connectorBody,
         {
@@ -86,10 +86,7 @@ export class MessageBirdSmsConnector
         input._passthrough,
       );
 
-    const url =
-      Object.keys(mergedQuery).length > 0
-        ? `${MESSAGEBIRD_ENDPOINT}?${new URLSearchParams(mergedQuery).toString()}`
-        : MESSAGEBIRD_ENDPOINT;
+    const url = MESSAGEBIRD_ENDPOINT;
 
     let response: Response;
     try {

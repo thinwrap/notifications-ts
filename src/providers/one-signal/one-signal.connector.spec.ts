@@ -289,7 +289,7 @@ describe('OneSignalPushConnector', () => {
       expect(body.contents).toEqual({ en: 'World', es: 'Mundo' });
     });
 
-    it('_passthrough merges into body, headers, and query', async () => {
+    it('_passthrough merges into body and headers', async () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({ id: 'n' }));
 
       await connector.send({
@@ -299,13 +299,12 @@ describe('OneSignalPushConnector', () => {
         _passthrough: {
           body: { custom_field: 'value' },
           headers: { 'X-Custom': 'yes' },
-          query: { dryRun: 'true' },
         },
       });
 
       const [url, init] = mockFetch.mock.calls[0]!;
       const reqInit = init as RequestInit;
-      expect(url).toBe(`${ONE_SIGNAL_URL}?dryRun=true`);
+      expect(url).toBe(ONE_SIGNAL_URL);
       const body = JSON.parse(reqInit.body as string) as Record<string, unknown>;
       expect(body.custom_field).toBe('value');
       const headers = reqInit.headers as Record<string, string>;

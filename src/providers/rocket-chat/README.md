@@ -65,4 +65,3 @@ await rc.send({
 ## Vendor docs
 
 - API reference: https://docs.rocket.chat/use-rocket.chat/workspace-administration/integrations
-- Webhook script: https://docs.rocket.chat/use-rocket.chat/workspace-administration/integrations/webhook-script

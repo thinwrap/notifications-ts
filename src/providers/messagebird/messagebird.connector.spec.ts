@@ -187,7 +187,7 @@ describe('MessageBirdSmsConnector', () => {
       }
     });
 
-    it('merges _passthrough.body, _passthrough.headers, and _passthrough.query into the request', async () => {
+    it('merges _passthrough.body and _passthrough.headers into the request', async () => {
       mockFetch.mockResolvedValueOnce(successResponse());
 
       await connector.send({
@@ -196,14 +196,13 @@ describe('MessageBirdSmsConnector', () => {
         _passthrough: {
           body: { reportUrl: 'https://example.com/dlr' },
           headers: { 'X-Trace-Id': 't-1' },
-          query: { dry_run: 'true' },
         },
       });
 
       const [url, init] = mockFetch.mock.calls[0]!;
       const reqInit = init as RequestInit;
 
-      expect(url).toBe('https://rest.messagebird.com/messages?dry_run=true');
+      expect(url).toBe('https://rest.messagebird.com/messages');
       const body = JSON.parse(reqInit.body as string) as Record<string, unknown>;
       expect(body.reportUrl).toBe('https://example.com/dlr');
       expect(body.recipients).toEqual(['+15559876543']);

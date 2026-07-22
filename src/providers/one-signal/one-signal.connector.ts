@@ -75,21 +75,16 @@ export class OneSignalPushConnector
       Authorization: `Basic ${this.config.apiKey}`,
     };
 
-    const { body: mergedBody, headers: mergedHeaders, query: mergedQuery } =
+    const { body: mergedBody, headers: mergedHeaders } =
       mergePassthrough<Record<string, unknown>>(
         connectorBody,
         connectorHeaders,
         input._passthrough,
       );
 
-    const finalUrl =
-      Object.keys(mergedQuery).length > 0
-        ? `${ONE_SIGNAL_ENDPOINT}?${new URLSearchParams(mergedQuery).toString()}`
-        : ONE_SIGNAL_ENDPOINT;
-
     let response: Response;
     try {
-      response = await this.fetchImpl(finalUrl, {
+      response = await this.fetchImpl(ONE_SIGNAL_ENDPOINT, {
         method: 'POST',
         headers: mergedHeaders,
         body: JSON.stringify(mergedBody),
