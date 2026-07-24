@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] — 2026-07-24
+
+### Changed
+
+- **`_passthrough.body` nested keys now pass through verbatim.** `transformKeys`
+  gained an opt-out `deep` flag; connectors normalising `_passthrough.body` now
+  transform only top-level keys, leaving nested data-carrying maps — SendGrid
+  `dynamic_template_data`, SparkPost `substitution_data`, Postmark `templateModel`
+  and similar — with the consumer's exact key casing instead of silently
+  camelCase-rewriting template variables and metadata.
+
+### Fixed
+
+- **APNs fails fast without an HTTP/2 transport.** Apple's push service mandates
+  HTTP/2 and Node's built-in `fetch` (undici) is HTTP/1.1-only, so when no
+  HTTP/2-capable transport is injected the connector now throws a clear
+  `ConnectorError` up front instead of emitting an opaque mid-request network
+  error. A consumer-supplied HTTP/2-capable `fetch` is unaffected.
+- **Connector hardening (second/third review pass)** — error-classification and
+  response-parsing corrections across the email, SMS, push, and chat connectors.
+
+### Security
+
+- **Credential redaction is centralised** in a new `redact` utility and applied
+  consistently. Providers whose credential lives in the request URL — the
+  Slack / Google Chat / MS Teams / Mattermost / Rocket.Chat / Discord webhooks
+  and the Telegram bot token — now scrub that secret from any transport-error
+  message a BYO `fetch` may surface and reduce the stored `cause` to a
+  non-sensitive shape.
+- **Webhook chat providers reject non-`https://` URLs**, so a stale or mistyped
+  config cannot send the webhook credential over cleartext.
+
 ## [1.0.3] — 2026-07-20
 
 ### Changed

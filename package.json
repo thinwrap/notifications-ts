@@ -1,6 +1,6 @@
 {
   "name": "@thinwrap/notifications",
-  "version": "1.0.3",
+  "version": "1.1.0",
   "description": "Unified TypeScript facade for 35 notification providers across email, SMS, push, and chat. Stateless, BYO fetch, zero vendor SDKs.",
   "main": "./dist/cjs/index.js",
   "module": "./dist/esm/index.js",
