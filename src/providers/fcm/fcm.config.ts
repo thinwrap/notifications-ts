@@ -14,12 +14,9 @@ import type { TokenCacheHook } from '../../types';
  */
 export interface FcmConfig {
   projectId: string;
-  /** Service-account `client_email` (post-rename; brownfield was `email`). */
+  /** Service-account `client_email`. */
   clientEmail: string;
-  /**
-   * Service-account `private_key` — PEM-encoded RSA private key
-   * (post-rename; brownfield was `secretKey`).
-   */
+  /** Service-account `private_key` — PEM-encoded RSA private key. */
   privateKey: string;
   /**
    * Optional consumer-provided token cache for the RS256 -> OAuth2

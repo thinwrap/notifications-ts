@@ -473,7 +473,7 @@ describe('MailgunEmailConnector', () => {
   });
 
   // ===========================================================================
-  // Brownfield Novu-shaped surface (preserved)
+  // Novu-compatible `sendMessage()` surface
   // ===========================================================================
 
   describe('.sendMessage() — preserved Novu surface', () => {

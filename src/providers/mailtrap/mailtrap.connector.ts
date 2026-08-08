@@ -290,15 +290,16 @@ export class MailtrapEmailConnector
   }
 
   // ---------------------------------------------------------------------------
-  // Brownfield Novu-shaped surface (Novu-compat)
+  // Novu-compatible `sendMessage()` surface
   // ---------------------------------------------------------------------------
 
   async sendMessage(
     options: IEmailOptions,
     bridgeProviderData: WithPassthrough<Record<string, unknown>> = {}
   ): Promise<ISendMessageSuccessResponse> {
-    // Mailtrap does not support tags at v1.0. The brownfield surface
-    // doesn't carry tags directly, but reject them if present via _passthrough.body.tags.
+    // Mailtrap has no tags field. This surface has no `tags` input either, but a
+    // caller can still smuggle them through `_passthrough.body.tags` — reject that
+    // explicitly rather than dropping them silently.
     const ptTags = (bridgeProviderData._passthrough?.body as Record<string, unknown> | undefined)?.tags;
     if (Array.isArray(ptTags) && ptTags.length > 0) {
       throw new ConnectorError({

@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.1] — 2026-08-08
+
+### Fixed
+
+- Every provider error collapsed into `provider_unavailable` with a null status when the host
+  application's `fetch` rejects on a non-2xx; the transport seam now rebuilds the `Response`.
+- A transport rejection could surface the credential-bearing request URL into
+  `ConnectorError.message` and `.cause` — for Telegram and every webhook provider, the URL
+  *is* the credential (CWE-532).
+
+### Changed
+
+- **Behaviour change:** `ConnectorError.message` on a transport failure is now a
+  fixed `Network error` / `Request cancelled`. Diagnostics moved to `cause.raw.code`.
+
+### Documentation
+
+- README: the transport contract, host-dispatcher isolation, and why transport failures carry
+  no message detail.
+
 ## [1.1.0] — 2026-07-24
 
 ### Changed

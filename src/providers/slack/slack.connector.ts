@@ -176,7 +176,7 @@ export class SlackChatConnector
   }
 
   // ---------------------------------------------------------------------------
-  // Brownfield Novu-shaped surface (Novu-compat)
+  // Novu-compatible `sendMessage()` surface
   // ---------------------------------------------------------------------------
 
   async sendMessage(
@@ -233,8 +233,8 @@ export class SlackChatConnector
     }
 
     if (!response.ok) {
-      // brownfield must map 429 → rate_limited and parse Retry-After —
-      // route through the canonical mapVendorError for both behaviors.
+      // Routed through mapVendorError so this surface maps 429 → rate_limited and
+      // parses Retry-After exactly as `.send()` does.
       const errText = await response.text().catch(() => null);
       throw this.mapVendorError(response.status, errText, response.headers);
     }

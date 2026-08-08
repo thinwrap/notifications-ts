@@ -775,7 +775,7 @@ describe('SendgridEmailConnector', () => {
   });
 
   // ===========================================================================
-  // Brownfield Novu-shaped surface (preserved)
+  // Novu-compatible `sendMessage()` surface
   // ===========================================================================
 
   describe('.sendMessage() — preserved Novu surface', () => {
@@ -906,7 +906,7 @@ describe('SendgridEmailConnector', () => {
         expect(err).toBeInstanceOf(ConnectorError);
         const connectorErr = err as ConnectorError;
         expect(connectorErr.statusCode).toBe(401);
-        // Brownfield now routes through canonical mapSendgridErrorToProviderCode
+        // Same classification path as send(): mapSendgridErrorToProviderCode
         expect(connectorErr.providerCode).toBe('auth_failed');
         expect(connectorErr.providerMessage).toBe('The provided authorization grant is invalid');
       }
@@ -924,7 +924,7 @@ describe('SendgridEmailConnector', () => {
         expect.unreachable('Should have thrown');
       } catch (err) {
         expect(err).toBeInstanceOf(ConnectorError);
-        expect((err as ConnectorError).message).toBe('Network failure');
+        expect((err as ConnectorError).message).toBe('Network error');
       }
     });
   });

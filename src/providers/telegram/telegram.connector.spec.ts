@@ -265,7 +265,7 @@ describe('TelegramChatConnector', () => {
   });
 
   // ===========================================================================
-  // Brownfield Novu-shaped `sendMessage()` surface (preserved verbatim)
+  // Novu-compatible `sendMessage()` surface
   // ===========================================================================
 
   describe('.sendMessage() — brownfield Novu-shaped surface', () => {
@@ -345,7 +345,7 @@ describe('TelegramChatConnector', () => {
         expect(err).toBeInstanceOf(ConnectorError);
         const connectorErr = err as ConnectorError;
         expect(connectorErr.statusCode).toBe(403);
-        // Brownfield now routes through canonical mapVendorError
+        // Same classification path as send(): mapVendorError
         expect(connectorErr.providerCode).toBe('auth_failed');
         expect(connectorErr.providerMessage).toBe('Forbidden: bot was blocked by the user');
       }
@@ -379,7 +379,7 @@ describe('TelegramChatConnector', () => {
         expect.unreachable('Should have thrown');
       } catch (err) {
         expect(err).toBeInstanceOf(ConnectorError);
-        expect((err as ConnectorError).message).toBe('Network failure');
+        expect((err as ConnectorError).message).toBe('Network error');
       }
     });
   });

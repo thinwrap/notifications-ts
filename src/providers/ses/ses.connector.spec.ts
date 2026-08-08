@@ -850,7 +850,7 @@ describe('SesEmailConnector', () => {
   });
 
   // ===========================================================================
-  // Brownfield Novu-shaped surface (preserved)
+  // Novu-compatible `sendMessage()` surface
   // ===========================================================================
 
   describe('.sendMessage() / .checkIntegration() — preserved Novu surface', () => {
@@ -965,7 +965,7 @@ describe('SesEmailConnector', () => {
         const connectorErr = err as ConnectorError;
         expect(connectorErr.message).toBe('Invalid credentials');
         expect(connectorErr.statusCode).toBe(401);
-        // Brownfield now routes through canonical mapSesErrorToProviderCode
+        // Same classification path as send(): mapSesErrorToProviderCode
         expect(connectorErr.providerCode).toBe('auth_failed');
         expect(connectorErr.providerMessage).toBe('Invalid credentials');
       }

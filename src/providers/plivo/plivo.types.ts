@@ -40,9 +40,8 @@ export interface PlivoNarrowedInput extends SmsSendInput {
 }
 
 /**
- * Brownfield narrowed input (pre). Preserved as a type alias so the
- * existing `sendMessage()` surface and consumers keep compiling; new
- * code should use {@link PlivoNarrowedInput}.
+ * Narrowed input for the Novu-compatible `sendMessage()` surface. Retained so
+ * existing callers keep compiling; new code should use {@link PlivoNarrowedInput}.
  */
 export interface PlivoSmsSendInput extends Omit<SmsSendInput, 'from'> {
   from: string;

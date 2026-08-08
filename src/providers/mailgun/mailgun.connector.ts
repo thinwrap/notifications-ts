@@ -210,7 +210,7 @@ export class MailgunEmailConnector
   }
 
   // ---------------------------------------------------------------------------
-  // Brownfield Novu-shaped surface (Novu-compat)
+  // Novu-compatible `sendMessage()` surface
   // ---------------------------------------------------------------------------
 
   async sendMessage(
@@ -385,7 +385,7 @@ export class MailgunEmailConnector
   }
 
   /**
-   * Legacy multipart builder for the brownfield `sendMessage()` surface.
+   * Multipart builder for the Novu-compatible `sendMessage()` surface.
    * Consumes Novu's `IAttachmentOptions` shape (`name`/`mime`/`file`) — kept
    * separate from `buildMultipartBody()` so the new Thinwrap surface speaks
    * the post attachment shape exclusively.

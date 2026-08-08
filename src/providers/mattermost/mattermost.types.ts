@@ -17,8 +17,10 @@ import type { ChatSendInput } from '../../types';
  * The connector surfaces no warning when overrides are blocked server-side.
  */
 export interface MattermostNarrowedInput extends ChatSendInput {
-  /** Slack-compatible attachment array. Each attachment's camelCase fields
-   * are mapped to snake_case wire keys by the connector. */
+  /**
+   * Slack-compatible attachment array. Each attachment's camelCase fields are
+   * mapped to snake_case wire keys by the connector.
+   */
   attachments?: SlackCompatAttachment[];
   /** Override the webhook's default username (server-config gated). */
   username?: string;

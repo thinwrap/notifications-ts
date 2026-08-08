@@ -297,7 +297,7 @@ describe('ExpoPushConnector', () => {
   });
 
   // ===========================================================================
-  // Brownfield Novu-shaped surface (preserved)
+  // Novu-compatible `sendMessage()` surface
   // ===========================================================================
 
   describe('.sendMessage() — preserved Novu surface', () => {
@@ -427,7 +427,7 @@ describe('ExpoPushConnector', () => {
         expect(err).toBeInstanceOf(ConnectorError);
         const connectorErr = err as ConnectorError;
         expect(connectorErr.statusCode).toBe(429);
-        // Brownfield now routes through canonical mapVendorError
+        // Same classification path as send(): mapVendorError
         expect(connectorErr.providerCode).toBe('rate_limited');
       }
     });

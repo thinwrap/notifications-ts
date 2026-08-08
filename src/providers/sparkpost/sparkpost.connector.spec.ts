@@ -545,7 +545,7 @@ describe('SparkPostEmailConnector', () => {
   });
 
   // ===========================================================================
-  // Brownfield Novu-shaped surface (preserved)
+  // Novu-compatible `sendMessage()` surface
   // ===========================================================================
 
   describe('.sendMessage() — preserved Novu surface', () => {
@@ -692,7 +692,7 @@ describe('SparkPostEmailConnector', () => {
         expect(err).toBeInstanceOf(ConnectorError);
         const connectorErr = err as ConnectorError;
         expect(connectorErr.statusCode).toBe(403);
-        // Brownfield now routes through canonical mapSparkPostErrorToProviderCode
+        // Same classification path as send(): mapSparkPostErrorToProviderCode
         expect(connectorErr.providerCode).toBe('auth_failed');
         expect(connectorErr.providerMessage).toBe('Forbidden');
       }
@@ -710,7 +710,7 @@ describe('SparkPostEmailConnector', () => {
         expect.unreachable('Should have thrown');
       } catch (err) {
         expect(err).toBeInstanceOf(ConnectorError);
-        expect((err as ConnectorError).message).toBe('Network failure');
+        expect((err as ConnectorError).message).toBe('Network error');
       }
     });
   });

@@ -46,8 +46,8 @@ export interface ExpoNarrowedInput
     ExpoInputAugmentation {}
 
 /**
- * Legacy alias preserved for the brownfield surface and Novu
- * consumers. New code should use {@link ExpoNarrowedInput}.
+ * Alias kept for the Novu-compatible `sendMessage()` surface. New code should use
+ * {@link ExpoNarrowedInput}.
  */
 export type ExpoPushSendInput = ExpoNarrowedInput;
 

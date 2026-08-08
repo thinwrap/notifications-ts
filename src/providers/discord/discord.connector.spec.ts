@@ -45,7 +45,7 @@ describe('DiscordChatConnector', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // Brownfield Novu-shaped sendMessage() surface
+  // Novu-compatible `sendMessage()` surface
   // ---------------------------------------------------------------------------
 
   describe('sendMessage (brownfield Novu-shaped surface)', () => {
@@ -125,7 +125,7 @@ describe('DiscordChatConnector', () => {
         expect(err).toBeInstanceOf(ConnectorError);
         const connectorErr = err as ConnectorError;
         expect(connectorErr.statusCode).toBe(404);
-        // Brownfield now routes through canonical mapVendorError
+        // Same classification path as send(): mapVendorError
         expect(connectorErr.providerCode).toBe('auth_failed');
         expect(connectorErr.providerMessage).toBe('Unknown Webhook');
       }
@@ -139,7 +139,7 @@ describe('DiscordChatConnector', () => {
         expect.unreachable('Should have thrown');
       } catch (err) {
         expect(err).toBeInstanceOf(ConnectorError);
-        expect((err as ConnectorError).message).toBe('Network failure');
+        expect((err as ConnectorError).message).toBe('Network error');
       }
     });
 
@@ -160,7 +160,10 @@ describe('DiscordChatConnector', () => {
         const ce = err as ConnectorError;
         expect(ce.message).not.toContain('789/secret-xyz');
         expect(ce.message).not.toContain('secret-xyz');
-        expect(ce.message).toContain('<redacted>');
+        // The transport seam now replaces the message outright, so the URL never
+        // reaches `redactSecrets` — a stronger guarantee than redacting it, and
+        // one that holds for the 27 connectors that have no redaction of their own.
+        expect(ce.message).toBe('Network error');
       }
     });
   });
@@ -419,7 +422,7 @@ describe('DiscordChatConnector', () => {
           'https://discord.com/api/webhooks/123/abc',
         );
         expect(ce.message).not.toContain('/123/abc');
-        expect(ce.message).toContain('<redacted>');
+        expect(ce.message).toBe('Network error');
       }
     });
 

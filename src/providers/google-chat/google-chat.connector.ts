@@ -24,11 +24,11 @@ import type {
  * credential. The `?key=<key>&token=<token>` query parameters embedded in the
  * URL are part of the credential surface — forwarded verbatim, never parsed.
  *
- * Google Chat is unusual in the Chat wave for using **camelCase wire keys**
- * (matching Google's API style guide)., all wire keys are
- * written explicitly in object literals; no `Casing` helper is invoked on the
- * new `send()` path. The brownfield `protected casing = CasingEnum.CAMEL_CASE`
- * is preserved only for the legacy `sendMessage()` surface.
+ * Google Chat is unusual among the chat providers in using **camelCase wire keys**
+ * (matching Google's API style guide). They are written explicitly in object
+ * literals, so no `Casing` helper runs on the `send()` path; the
+ * `protected casing = CasingEnum.CAMEL_CASE` field exists only for the
+ * Novu-compatible `sendMessage()` surface.
  *
  * Unlike Slack/MS Teams (plain-text response), Google Chat returns a full JSON
  * `Message` resource on success; `providerMessageId` carries the full resource
@@ -184,7 +184,7 @@ export class GoogleChatChatConnector
   }
 
   // ---------------------------------------------------------------------------
-  // Brownfield Novu-shaped surface (Novu-compat)
+  // Novu-compatible `sendMessage()` surface
   // ---------------------------------------------------------------------------
 
   async sendMessage(

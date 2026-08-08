@@ -27,9 +27,8 @@ export interface TelnyxNarrowedInput extends SmsSendInput {
 }
 
 /**
- * Brownfield narrowed input (pre). Preserved as a type alias so the
- * existing `sendMessage()` surface and consumers keep compiling; new
- * code should use {@link TelnyxNarrowedInput}.
+ * Narrowed input for the Novu-compatible `sendMessage()` surface. Retained so
+ * existing callers keep compiling; new code should use {@link TelnyxNarrowedInput}.
  */
 export interface TelnyxSmsSendInput extends Omit<SmsSendInput, 'from'> {
   from: string;

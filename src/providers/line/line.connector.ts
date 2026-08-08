@@ -25,8 +25,7 @@ import type {
  * Endpoint pinned to LINE's Push API (`POST /v2/bot/message/push`) — Reply,
  * Multicast, Broadcast, and Narrowcast APIs are out-of-scope for v1.0.
  *
- * Brownfield `sendMessage()` is preserved verbatim alongside the new `.send()`
- * for's Novu provider-interface wrap.
+ * `sendMessage()` exists alongside `.send()` as the Novu-compatible surface.
  */
 export class LineChatConnector
   extends BaseConnector
@@ -212,7 +211,7 @@ export class LineChatConnector
   }
 
   // ---------------------------------------------------------------------------
-  // Brownfield Novu-shaped surface (Novu-compat)
+  // Novu-compatible `sendMessage()` surface
   // ---------------------------------------------------------------------------
 
   async sendMessage(

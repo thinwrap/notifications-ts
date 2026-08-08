@@ -19,13 +19,12 @@ import type {
 } from './whatsapp-business.types';
 
 /**
- * Token-auth chat connector. Authorization is a Bearer header
- * carrying a Meta Business Manager system-user access token. The endpoint
- * embeds a versioned Graph API segment (`/v21.0...`) pinned outlier
- * discipline and overridable via `config.graphApiVersion`.
+ * Token-auth chat connector. Authorization is a Bearer header carrying a Meta
+ * Business Manager system-user access token. The endpoint embeds a versioned Graph
+ * API segment (`/v21.0...`), pinned here and overridable via
+ * `config.graphApiVersion`.
  *
- * Brownfield `sendMessage()` is preserved verbatim alongside the new `.send()`
- * for's Novu provider-interface wrap.
+ * `sendMessage()` exists alongside `.send()` as the Novu-compatible surface.
  */
 const DEFAULT_GRAPH_API_VERSION = 'v21.0';
 
@@ -220,7 +219,7 @@ export class WhatsAppChatConnector
   }
 
   // ---------------------------------------------------------------------------
-  // Brownfield Novu-shaped surface (Novu-compat)
+  // Novu-compatible `sendMessage()` surface
   // ---------------------------------------------------------------------------
 
   async sendMessage(

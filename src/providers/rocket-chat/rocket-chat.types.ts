@@ -16,8 +16,10 @@ import type { ChatSendInput } from '../../types';
  * for the Incoming Webhook payload.
  */
 export interface RocketChatNarrowedInput extends ChatSendInput {
-  /** Slack-compatible attachment array. Each attachment's camelCase fields
-   * are mapped to snake_case wire keys by the connector. */
+  /**
+   * Slack-compatible attachment array. Each attachment's camelCase fields are
+   * mapped to snake_case wire keys by the connector.
+   */
   attachments?: SlackCompatAttachment[];
   /** Override the webhook's display name (Rocket.Chat's term for Slack's `username`). */
   alias?: string;

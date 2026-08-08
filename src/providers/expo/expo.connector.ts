@@ -51,10 +51,9 @@ export class ExpoPushConnector
    * native — no casing transform needed), optionally adds Bearer auth, and
    * POSTs to the single Expo push endpoint.
    *
-   * Single-recipient enforcement — multi-target batching is not
-   * exposed on the unified surface. Consumers needing batched sends use the
-   * brownfield `sendMessage()` surface or pass an array via
-   * `_passthrough.body`.
+   * Single-recipient by design — multi-target batching is not exposed on the
+   * unified surface. Consumers needing batched sends use the Novu-compatible
+   * `sendMessage()` surface or pass an array via `_passthrough.body`.
    *
    * Expo emits HTTP 200 even for soft errors — `data.status` is inspected
    * after the HTTP layer; `status: 'error'` is mapped via
@@ -222,7 +221,7 @@ export class ExpoPushConnector
   }
 
   // ---------------------------------------------------------------------------
-  // Brownfield Novu-shaped surface (Novu-compat)
+  // Novu-compatible `sendMessage()` surface
   // ---------------------------------------------------------------------------
 
   async sendMessage(
@@ -294,7 +293,8 @@ export class ExpoPushConnector
     }
 
     if (!response.ok) {
-      // brownfield must parse Retry-After on 429 too — route through mapVendorError.
+      // Routed through mapVendorError so this surface parses Retry-After on a 429
+      // exactly as `.send()` does.
       const errBody = (await response.json().catch(() => null)) as
         | { errors?: { message?: string }[] }
         | null;

@@ -52,11 +52,10 @@ export class ScalewayEmailConnector
    *   2. **Auth is `X-Auth-Token: <secretKey>`** — not `Authorization`.
    *   3. **`project_id` is mandatory** and comes from config.
    *
-   * Unlike SparkPost there is NO Novu brownfield `sendMessage` surface — Novu
-   * has no Scaleway provider, so this connector is Thinwrap-native only per
-   * Novu compat is best-effort, not a contract.
+   * There is NO Novu-compatible `sendMessage()` surface here: Novu has no Scaleway
+   * provider, so there is no shape to be compatible with.
    *
-   * Graceful degradation the >=90% baseline-coverage rule:
+   * Graceful degradation where Scaleway falls below the >=90% baseline:
    *   - `tags` — Scaleway has no tags field at v1.0; silently dropped.
    *   - attachment `contentId` — no inline-image field at v1.0; silently dropped.
    *   - `replyTo` — Scaleway has no `reply_to` field; emitted as a

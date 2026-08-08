@@ -58,9 +58,8 @@ export interface SnsNarrowedInput extends SmsSendInput {
 }
 
 /**
- * Brownfield narrowed input (pre). Preserved as a type alias so the
- * existing `sendMessage()` surface keeps compiling; new code should use
- * {@link SnsNarrowedInput}.
+ * Narrowed input for the Novu-compatible `sendMessage()` surface. Retained so
+ * existing callers keep compiling; new code should use {@link SnsNarrowedInput}.
  */
 export interface SnsSmsSendInput extends Omit<SmsSendInput, 'from'> {
   from: string;

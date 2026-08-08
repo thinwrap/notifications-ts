@@ -320,19 +320,15 @@ export class ApnsPushConnector
   }
 
   // ---------------------------------------------------------------------------
-  // Brownfield Novu-shaped surface (Novu-compat)
+  // Novu-compatible `sendMessage()` surface
   // ---------------------------------------------------------------------------
 
   /**
-   * Preserved Novu-shaped surface. Like the FCM brownfield surface, this
-   * mints a fresh JWT on every call (stateless). Consumers
-   * wanting amortization use the Thinwrap-native `.send()` surface with a
-   * `tokenCache` hook.
+   * Mints a fresh JWT on every call, like the FCM equivalent — this surface takes no
+   * `tokenCache` hook, so consumers wanting the signing cost amortized use `.send()`.
    *
-   * the canonical `.send()` surface is single-recipient; this
-   * brownfield surface preserves multi-target dispatch via `Promise.allSettled`
-   * for backward compatibility with the original ts-notification-connectors
-   * IPushProvider contract.
+   * Unlike `.send()`, which is single-recipient, this dispatches to multiple targets
+   * via `Promise.allSettled` to match the Novu `IPushProvider` contract.
    */
   async sendMessage(
     options: IPushOptions,

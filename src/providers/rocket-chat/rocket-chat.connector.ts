@@ -223,9 +223,9 @@ export class RocketChatChatConnector
   }
 
   // ---------------------------------------------------------------------------
-  // Brownfield Novu-shaped surface (minimal Novu drop-in
-  // Novu compat is best-effort, not a contract; Novu input is adapted to Thinwrap's
-  // `.send()` path and the Novu success-response shape is reconstructed).
+  // Novu-compatible `sendMessage()` surface. Best-effort, not a contract: the Novu
+  // input is adapted onto the `.send()` path and its success-response shape is
+  // reconstructed from the result.
   // ---------------------------------------------------------------------------
 
   async sendMessage(

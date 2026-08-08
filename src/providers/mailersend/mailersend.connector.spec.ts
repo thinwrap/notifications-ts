@@ -474,7 +474,7 @@ describe('MailerSendEmailConnector', () => {
   });
 
   // ===========================================================================
-  // Brownfield Novu-shaped surface (preserved)
+  // Novu-compatible `sendMessage()` surface
   // ===========================================================================
 
   describe('.sendMessage() — preserved Novu surface', () => {
@@ -608,7 +608,7 @@ describe('MailerSendEmailConnector', () => {
         expect.unreachable('Should have thrown');
       } catch (err) {
         expect(err).toBeInstanceOf(ConnectorError);
-        expect((err as ConnectorError).message).toBe('Network failure');
+        expect((err as ConnectorError).message).toBe('Network error');
       }
     });
   });

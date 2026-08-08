@@ -76,8 +76,8 @@ export interface OneSignalNarrowedInput
     OneSignalInputAugmentation {}
 
 /**
- * Legacy alias preserved for the brownfield surface and Novu
- * consumers. New code should use {@link OneSignalNarrowedInput}.
+ * Alias kept for the Novu-compatible `sendMessage()` surface. New code should use
+ * {@link OneSignalNarrowedInput}.
  */
 export type OneSignalPushSendInput = OneSignalNarrowedInput;
 

@@ -44,9 +44,8 @@ export interface TwilioNarrowedInput extends SmsSendInput {
 }
 
 /**
- * Brownfield narrowed input (pre, post). Preserved as a
- * type alias so the existing `sendMessage()` surface and consumers
- * keep compiling; new code should use {@link TwilioNarrowedInput}.
+ * Narrowed input for the Novu-compatible `sendMessage()` surface. Retained so
+ * existing callers keep compiling; new code should use {@link TwilioNarrowedInput}.
  */
 export interface TwilioSmsSendInput extends Omit<SmsSendInput, 'from'> {
   from: string;

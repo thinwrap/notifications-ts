@@ -226,15 +226,15 @@ describe('RocketChatChatConnector', () => {
     // translates it to the wire `channel` field. So this must type-check.
     void (async () => connector.send({ to: 'x', body: 'y' }));
 
-    // Compile-time contract: the brownfield REST-auth config fields no longer
-    // exist on RocketChatConfig (breaking change this is the first public release with no prior consumers).
-    // @ts-expect-error - 'serverUrl' is not a field on RocketChatConfig (was brownfield REST-API auth).
+    // Compile-time contract: the REST-API auth fields the unpublished predecessor
+    // used must not exist on RocketChatConfig.
+    // @ts-expect-error - 'serverUrl' is not a field on RocketChatConfig (a removed REST-API auth field).
     void ({ webhookUrl: 'x', serverUrl: 'y' } satisfies RocketChatConfig);
-    // @ts-expect-error - 'authToken' is not a field on RocketChatConfig (was brownfield REST-API auth).
+    // @ts-expect-error - 'authToken' is not a field on RocketChatConfig (a removed REST-API auth field).
     void ({ webhookUrl: 'x', authToken: 'y' } satisfies RocketChatConfig);
-    // @ts-expect-error - 'userId' is not a field on RocketChatConfig (was brownfield REST-API auth).
+    // @ts-expect-error - 'userId' is not a field on RocketChatConfig (a removed REST-API auth field).
     void ({ webhookUrl: 'x', userId: 'y' } satisfies RocketChatConfig);
-    // @ts-expect-error - 'roomId' is not a field on RocketChatConfig (was brownfield REST-API auth).
+    // @ts-expect-error - 'roomId' is not a field on RocketChatConfig (a removed REST-API auth field).
     void ({ webhookUrl: 'x', roomId: 'y' } satisfies RocketChatConfig);
   });
 

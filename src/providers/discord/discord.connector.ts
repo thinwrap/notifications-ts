@@ -93,8 +93,8 @@ export class DiscordChatConnector
         input._passthrough,
       );
 
-    // `wait=true` is preserved from the brownfield: it tells Discord to return
-    // the created message (with id) instead of HTTP 204 No Content.
+    // `wait=true` is always sent: without it Discord answers HTTP 204 with no body,
+    // and the created message's id would be unavailable to return.
     const queryParams: Record<string, string> = { wait: 'true', ...mergedQuery };
     if (input.threadId !== undefined) queryParams.thread_id = input.threadId;
 
@@ -218,7 +218,7 @@ export class DiscordChatConnector
   }
 
   // ---------------------------------------------------------------------------
-  // Brownfield Novu-shaped surface (Novu-compat)
+  // Novu-compatible `sendMessage()` surface
   // ---------------------------------------------------------------------------
 
   async sendMessage(

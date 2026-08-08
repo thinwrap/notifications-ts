@@ -248,7 +248,7 @@ export class SparkPostEmailConnector
   }
 
   /**
-   * canonical transform: build SparkPost's `recipients[]` array from
+   * Build SparkPost's `recipients[]` array from
    * `EmailSendInput.{to,cc,bcc}`. Primary `to` recipients are added without
    * `header_to`; each cc and bcc recipient is appended as a separate entry
    * with `address.header_to: <primary to>` so the recipient's email client
@@ -313,7 +313,7 @@ export class SparkPostEmailConnector
   }
 
   // ---------------------------------------------------------------------------
-  // Brownfield Novu-shaped surface (Novu-compat)
+  // Novu-compatible `sendMessage()` surface
   // ---------------------------------------------------------------------------
 
   async sendMessage(

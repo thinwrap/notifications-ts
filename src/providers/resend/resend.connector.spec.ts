@@ -584,7 +584,7 @@ describe('ResendEmailConnector', () => {
   });
 
   // ===========================================================================
-  // Brownfield Novu-shaped surface (preserved)
+  // Novu-compatible `sendMessage()` surface
   // ===========================================================================
 
   describe('.sendMessage() — preserved Novu surface', () => {
@@ -705,7 +705,7 @@ describe('ResendEmailConnector', () => {
         expect(err).toBeInstanceOf(ConnectorError);
         const connectorErr = err as ConnectorError;
         expect(connectorErr.statusCode).toBe(422);
-        // Brownfield now routes through canonical mapResendErrorToProviderCode
+        // Same classification path as send(): mapResendErrorToProviderCode
         expect(connectorErr.providerCode).toBe('invalid_request');
         expect(connectorErr.providerMessage).toBe('Invalid email');
       }

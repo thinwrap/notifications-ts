@@ -47,7 +47,7 @@ describe('PusherBeamsPushConnector', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // Brownfield surface (preserved wrap target)
+  // Novu-compatible `sendMessage()` surface
   // ---------------------------------------------------------------------------
 
   describe('brownfield sendMessage()', () => {
@@ -103,7 +103,7 @@ describe('PusherBeamsPushConnector', () => {
         expect(err).toBeInstanceOf(ConnectorError);
         const connectorErr = err as ConnectorError;
         expect(connectorErr.statusCode).toBe(401);
-        // Brownfield now routes through canonical mapVendorError
+        // Same classification path as send(): mapVendorError
         expect(connectorErr.providerCode).toBe('auth_failed');
         expect(connectorErr.providerMessage).toBe('Unauthorized');
       }
@@ -117,7 +117,7 @@ describe('PusherBeamsPushConnector', () => {
         expect.unreachable('Should have thrown');
       } catch (err) {
         expect(err).toBeInstanceOf(ConnectorError);
-        expect((err as ConnectorError).message).toBe('Network failure');
+        expect((err as ConnectorError).message).toBe('Network error');
       }
     });
   });

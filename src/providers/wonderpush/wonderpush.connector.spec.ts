@@ -57,7 +57,7 @@ describe('WonderPushPushConnector', () => {
       const [url, init] = mockFetch.mock.calls[0]!;
       const reqInit = init as RequestInit;
 
-      // URL is the bare endpoint, NO accessToken query param (brownfield migration).
+      // Auth rides in the Authorization header, so the URL carries no accessToken.
       expect(url).toBe('https://management-api.wonderpush.com/v1/deliveries');
       expect(reqInit.method).toBe('POST');
       expect(reqInit.headers).toEqual(
@@ -297,7 +297,7 @@ describe('WonderPushPushConnector', () => {
   });
 
   // ===========================================================================
-  // Brownfield Novu-shaped surface (preserved)
+  // Novu-compatible `sendMessage()` surface
   // ===========================================================================
 
   describe('.sendMessage() — preserved Novu surface', () => {
@@ -408,7 +408,7 @@ describe('WonderPushPushConnector', () => {
         expect(err).toBeInstanceOf(ConnectorError);
         const connectorErr = err as ConnectorError;
         expect(connectorErr.statusCode).toBe(401);
-        // Brownfield now routes through canonical mapVendorError
+        // Same classification path as send(): mapVendorError
         expect(connectorErr.providerCode).toBe('auth_failed');
         expect(connectorErr.providerMessage).toBe('Invalid access token');
       }
@@ -422,7 +422,7 @@ describe('WonderPushPushConnector', () => {
         expect.unreachable('Should have thrown');
       } catch (err) {
         expect(err).toBeInstanceOf(ConnectorError);
-        expect((err as ConnectorError).message).toBe('Network failure');
+        expect((err as ConnectorError).message).toBe('Network error');
       }
     });
   });

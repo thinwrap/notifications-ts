@@ -38,7 +38,7 @@ describe('MsTeamsChatConnector', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // Brownfield Novu-shaped sendMessage() surface
+  // Novu-compatible `sendMessage()` surface
   // ---------------------------------------------------------------------------
 
   describe('sendMessage (brownfield Novu-shaped surface)', () => {
@@ -121,7 +121,7 @@ describe('MsTeamsChatConnector', () => {
         expect(err).toBeInstanceOf(ConnectorError);
         const connectorErr = err as ConnectorError;
         expect(connectorErr.statusCode).toBe(400);
-        // Brownfield now routes through canonical mapVendorError
+        // Same classification path as send(): mapVendorError
         expect(connectorErr.providerCode).toBe('invalid_request');
         expect(connectorErr.providerMessage).toBe('InvalidPayload');
       }
@@ -135,7 +135,7 @@ describe('MsTeamsChatConnector', () => {
         expect.unreachable('Should have thrown');
       } catch (err) {
         expect(err).toBeInstanceOf(ConnectorError);
-        expect((err as ConnectorError).message).toBe('Network failure');
+        expect((err as ConnectorError).message).toBe('Network error');
       }
     });
   });

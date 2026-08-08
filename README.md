@@ -70,6 +70,32 @@ const email = new Email('sendgrid', {
 });
 ```
 
+
+### The injected `fetch` does not isolate you from the host
+
+**Contract: a non-2xx must be RETURNED as a `Response`, not thrown** — that is plain fetch
+semantics, and it is what lets each connector map the status to a `providerCode`
+(429 → `rate_limited`, 401 → `auth_failed`, …).
+
+On Node, both `globalThis.fetch` and `undici.fetch` dispatch through undici's
+*process-global* dispatcher, so whatever the application installed applies to your calls
+too — including a `responseError()` interceptor, under which a non-2xx **rejects** instead
+of resolving. The library detects that and rebuilds the `Response`, so classification
+still works. It cannot repair one thing: if the provider gzipped the error body, that
+interceptor buffers it below fetch's content-decoding and the bytes are destroyed before
+any library sees them, so the vendor's message is lost.
+
+To make your calls genuinely independent of the host's configuration, pass an explicit
+dispatcher instead of relying on the global one:
+
+```ts
+import { Agent, fetch as undiciFetch } from 'undici';
+
+const isolated = new Agent();                      // no inherited interceptors
+const fetchImpl = ((url, init) =>
+  undiciFetch(url as string, { ...init, dispatcher: isolated })) as typeof fetch;
+```
+
 The wrapper holds no state — no token cache, no connection pool, no retry buffer.
 FCM and APNs sign tokens fresh on every `.send()` by default; supply an optional
 `tokenCache?: TokenCacheHook` in config to amortize signing cost. See the
@@ -100,6 +126,19 @@ try {
 The wrapper performs no automatic retry. Compose your own retry strategy from
 `providerCode` and the raw vendor response carried on `e.cause` (including the
 `Retry-After` header where the vendor sets one).
+
+### Transport failures carry no message detail, by design
+
+When the request never reaches the provider, `e.message` is a fixed `Network error` (or
+`Request cancelled`), **not** the underlying error's text. For this package the request
+URL is frequently the credential itself — Telegram's `/bot<token>/…` path, and every
+webhook provider (Slack, Discord, Mattermost, MS Teams, Google Chat, Rocket.Chat) — and
+Node embeds that URL in the error message it raises, so any logger recording `e.message`
+would capture the secret (CWE-532).
+
+The diagnostic you actually want is preserved: read `e.cause.raw.code` for the failure
+identifier (`ECONNRESET`, `UND_ERR_SOCKET`, …), which names the failure more precisely
+than the prose ever did. `e.name` is preserved too, so cancellation detection still works.
 
 ## `_passthrough` escape valve
 
@@ -295,6 +334,23 @@ to one line per send. Error handling and retry composition stay yours.
 - [`.ai/guidelines.md`](.ai/guidelines.md) — contributor entry point: how to add a connector.
 - [`.ai/ARCHITECTURE.md`](.ai/ARCHITECTURE.md) — facade-dispatch-base pattern.
 - [`.ai/CONVENTIONS.md`](.ai/CONVENTIONS.md) — naming, file layout, test patterns.
+
+## Security
+
+Report vulnerabilities **privately** — please do not open a public issue. Preferred: a
+[private security advisory](https://github.com/thinwrap/notifications-ts/security/advisories/new)
+on this repository. Alternatively, email **security@thinwrap.dev**. Include the affected
+versions and a minimal reproduction if you have one.
+
+A vulnerability in a *provider's* own API or service belongs to that vendor rather than
+to this wrapper — please report those upstream.
+
+Supply chain: releases are published to npm via GitHub Actions OIDC
+trusted-publishing with **Sigstore provenance attestation** — verify an installed copy
+with `npm audit signatures @thinwrap/notifications@<version>`. No long-lived npm publish
+token exists in this repository or its CI secrets, the publishing account requires
+two-factor authentication (TOTP, with npm's `auth-and-writes` setting), and CI consumes
+no external reusable workflows.
 
 ## License
 

@@ -74,8 +74,8 @@ export interface WonderPushNarrowedInput
     WonderPushInputAugmentation {}
 
 /**
- * Legacy alias preserved for the brownfield surface and Novu
- * consumers. New code should use {@link WonderPushNarrowedInput}.
+ * Alias kept for the Novu-compatible `sendMessage()` surface. New code should use
+ * {@link WonderPushNarrowedInput}.
  */
 export type WonderPushPushSendInput = WonderPushNarrowedInput;
 

@@ -549,7 +549,7 @@ describe('SnsSmsConnector', () => {
   });
 
   // ===========================================================================
-  // Brownfield Novu-shaped surface (preserved)
+  // Novu-compatible `sendMessage()` surface
   // ===========================================================================
 
   describe('.sendMessage() — preserved Novu surface', () => {
@@ -665,7 +665,7 @@ describe('SnsSmsConnector', () => {
         const connectorErr = err as ConnectorError;
         expect(connectorErr.message).toBe('Invalid parameter: PhoneNumber');
         expect(connectorErr.statusCode).toBe(400);
-        // Brownfield now routes through canonical classifySnsError
+        // Same classification path as send(): classifySnsError
         expect(connectorErr.providerCode).toBe('invalid_request');
         expect(connectorErr.providerMessage).toBe('Invalid parameter: PhoneNumber');
       }
@@ -683,7 +683,7 @@ describe('SnsSmsConnector', () => {
       } catch (err) {
         expect(err).toBeInstanceOf(ConnectorError);
         const connectorErr = err as ConnectorError;
-        expect(connectorErr.message).toBe('Network failure');
+        expect(connectorErr.message).toBe('Network error');
         expect(connectorErr.statusCode).toBeNull();
         expect(connectorErr.providerCode).toBe('provider_unavailable');
       }
