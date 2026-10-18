@@ -12,7 +12,7 @@ const sn = new Sms('sinch', {
   servicePlanId: process.env.SINCH_PLAN_ID!,
   apiToken: process.env.SINCH_TOKEN!,
   from: '+14155550100',
-  region: 'us',                        // 'us' (default) or 'eu'
+  region: 'us',                        // 'us' (default), 'eu', 'au', 'br', 'ca'
 });
 ```
 
@@ -21,7 +21,7 @@ const sn = new Sms('sinch', {
 | `servicePlanId` | `string` | yes | URL path parameter |
 | `apiToken` | `string` | yes | Bearer credential |
 | `from` | `string` | no | Per-call overridable |
-| `region` | `'us' \| 'eu'` | no | Sinch cluster |
+| `region` | `'us' \| 'eu' \| 'au' \| 'br' \| 'ca'` | no | Sinch cluster; any other value → `invalid_request` before sending |
 
 ## Auth setup
 
@@ -31,7 +31,7 @@ Service Plan ID + API Token from Sinch dashboard → Service plans. Static.
 
 Region-derived:
 - `us` (default): `https://us.sms.api.sinch.com/xms/v1/<servicePlanId>/batches`
-- `eu`: `https://eu.sms.api.sinch.com/xms/v1/<servicePlanId>/batches`
+- `eu` / `au` / `br` / `ca`: `https://<region>.sms.api.sinch.com/xms/v1/<servicePlanId>/batches`
 
 ## Narrowed input augmentations
 
@@ -46,7 +46,7 @@ Standard SMS input. Delivery report URLs, scheduled send via `_passthrough.body`
 | 400 | (other) | `invalid_request` |
 | 429 | (any) | `rate_limited` |
 | 5xx | (any) | `provider_unavailable` |
-| network failure | — | `unknown` |
+| network failure | — | `provider_unavailable` |
 
 ## `_passthrough` examples
 

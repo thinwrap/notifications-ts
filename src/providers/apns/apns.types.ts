@@ -25,7 +25,8 @@ export interface ApnsInputAugmentation {
 
   /** Apple-spec `aps` dictionary. Kebab-case keys per Apple's wire format. */
   aps?: {
-    alert?: { title?: string; body?: string; subtitle?: string };
+    /** Apple's `aps.alert` is a string (the body text) or a dictionary. */
+    alert?: string | { title?: string; body?: string; subtitle?: string };
     sound?: string | { critical?: boolean; name?: string; volume?: number };
     badge?: number;
     'thread-id'?: string;
@@ -39,7 +40,10 @@ export interface ApnsInputAugmentation {
   /** Overrides `config.bundleId` in the `apns-topic` header on a per-send basis. */
   apnsTopic?: string;
 
-  /** Defaults to `'alert'` when `title`/`body` present, else `'background'`. */
+  /**
+   * Defaults to `'alert'` when the merged `aps` has `alert`, `badge` or
+   * `sound`, else `'background'`.
+   */
   apnsPushType?:
     | 'alert'
     | 'background'
@@ -76,7 +80,8 @@ export type ApnsPushSendInput = Omit<PushSendInput, 'data'> & ApnsInputAugmentat
  */
 export interface ApnsPayload {
   aps: {
-    alert?: { title?: string; body?: string; subtitle?: string };
+    /** Apple's `aps.alert` is a string (the body text) or a dictionary. */
+    alert?: string | { title?: string; body?: string; subtitle?: string };
     badge?: number;
     sound?: string | { critical?: boolean; name?: string; volume?: number };
     'thread-id'?: string;

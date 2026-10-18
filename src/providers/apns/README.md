@@ -14,7 +14,7 @@ const apns = new Push('apns', {
   privateKey: process.env.APNS_P8!,               // PKCS#8 PEM EC P-256
   bundleId: 'com.example.app',
   env: 'production',                              // 'production' | 'sandbox'
-  tokenCache: myCacheImpl,                        // optional
+  tokenCache: myCacheImpl,                        // required in production
 });
 ```
 
@@ -25,7 +25,7 @@ const apns = new Push('apns', {
 | `privateKey` | `string` | yes | PKCS#8 PEM contents of the `.p8` file |
 | `bundleId` | `string` | yes | App bundle ID; default `apns-topic` header |
 | `env` | `'production' \| 'sandbox'` | yes | Explicit — no default |
-| `tokenCache` | `TokenCacheHook` | no | Consumer-provided cache for the signed JWT |
+| `tokenCache` | `TokenCacheHook` | **yes in production** (type-optional) | Consumer-provided cache for the signed JWT — see below |
 
 ## Auth setup
 
@@ -33,12 +33,18 @@ The connector signs an ES256 JWT (algorithm `ES256`, header `kid` =
 `config.keyId`, payload `iss` = `config.teamId`) using the PKCS#8 P-256
 private key from the Apple `.p8` file. APNs accepts JWTs for ~60 min.
 
-By default the wrapper signs fresh on every `.send()` (stateless —
-the wrapper holds no state). Pass `tokenCache: TokenCacheHook` to
-amortize signing cost across many sends — the wrapper memoizes through the
-hook with the deterministic key `'apns:' + teamId + ':' + keyId + ':' + bundleId`.
-On vendor 403 the wrapper does **not** auto-evict; eviction is the consumer's
-responsibility.
+**`tokenCache` is required in production — it is not a speed optimisation.**
+Apple: "Refresh your token no more than once every 20 minutes and no less than
+once every 60 minutes", and APNs answers `429 TooManyProviderTokenUpdates` when
+a new token arrives more often than that. The wrapper holds no state, so
+without a hook it signs a fresh JWT on every `.send()` / `sendMessage()`; the
+second send inside 20 minutes can then be rejected. Back the hook with a store
+shared by every process that sends with the same key (Redis, memcached, …).
+
+The wrapper memoizes through the hook with the deterministic key
+`'apns:' + teamId + ':' + keyId + ':' + bundleId` and a 50-minute expiry
+(inside Apple's 20–60 minute window). On vendor 403 the wrapper does **not**
+auto-evict; eviction is the consumer's responsibility.
 
 ## Endpoint
 
@@ -58,6 +64,15 @@ HTTP/2 only. The `bundleId` is sent as the `apns-topic` header.
 Standard push input (`to`, `title`, `body`, `data` — the 4-field baseline).
 APNs-narrowed: `badge` (→ `aps.badge`), `sound` (→ `aps.sound`), `ttl`
 (→ `apns-expiration`).
+
+`apns-push-type` is `alert` when the merged `aps` has any of `alert`, `badge`
+or `sound` (from the typed fields, `input.aps` or `_passthrough.body.aps`) —
+Apple's alert type covers "an alert, badge, or sound" — and `background` only
+when it has none of them. An `apnsPushType` or `apns-push-type` header you set
+always wins. When the effective type is `background` the connector adds
+`apns-priority: 5` and `aps["content-available"] = 1` unless you set them,
+because Apple treats priority 10 on a background push as an error and defaults
+an omitted priority to 10.
 `apns-topic`, `apns-priority`, `apns-collapse-id`, `apns-expiration`,
 mutable-content, and content-available via `_passthrough.body` (top-level
 `aps` keys) or `_passthrough.headers`.
@@ -66,12 +81,15 @@ mutable-content, and content-available via `_passthrough.body` (top-level
 
 | Vendor HTTP | Vendor signal | `providerCode` |
 |---|---|---|
-| 403 `InvalidProviderToken` | `auth_failed` |
-| 400 `BadDeviceToken` | `invalid_recipient` |
-| 400 (other reason) | `invalid_request` |
-| 429 / 503 | (any) | `rate_limited` / `provider_unavailable` |
+| 403 | `InvalidProviderToken` / `ExpiredProviderToken` / other | `auth_failed` |
+| 400 / 403 | `BadDeviceToken` | `invalid_recipient` |
+| 410 | `Unregistered` | `invalid_recipient` |
+| 400 / 413 | (other reason) | `invalid_request` |
+| 429 | `TooManyProviderTokenUpdates` | `auth_failed` — the message names `tokenCache` as the fix |
+| 429 | (other) | `rate_limited` |
 | 5xx | (any) | `provider_unavailable` |
-| network failure | — | `unknown` |
+| (pre-flight) | `privateKey` unusable for ES256 signing | `auth_failed` (cause carries only the error class name) |
+| network failure | — | `provider_unavailable` |
 
 ## `_passthrough` examples
 

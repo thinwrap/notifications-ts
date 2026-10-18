@@ -115,6 +115,7 @@ export class SparkPostEmailConnector
         body: serializedBody,
       });
     } catch (error) {
+      if (error instanceof ConnectorError) throw error;
       if ((error as Error)?.name === 'AbortError') {
         throw new ConnectorError({
           message: (error as Error).message ?? 'Request cancelled',
@@ -224,11 +225,14 @@ export class SparkPostEmailConnector
           typeof a.content === 'string'
             ? encodeBase64Utf8(a.content)
             : encodeBase64Bytes(a.content);
+        // Transmissions API: `type` is required on both arrays, and an inline
+        // image's `name` "will be inserted into the Content-ID header" — so it
+        // is the cid the HTML references, not the filename.
         const item: Record<string, unknown> = {
-          name: a.filename,
+          name: a.contentId ? a.contentId : a.filename,
+          type: a.contentType || 'application/octet-stream',
           data: contentBase64,
         };
-        if (a.contentType) item.type = a.contentType;
         if (a.contentId) inlineImages.push(item);
         else attachments.push(item);
       }
@@ -350,12 +354,21 @@ export class SparkPostEmailConnector
     if (options.replyTo) content.reply_to = options.replyTo;
 
     if (options.attachments && options.attachments.length > 0) {
-      content.attachments = options.attachments.map((a) => ({
-        name: a.name ?? 'attachment',
-        type: a.mime,
-        data: encodeBase64Bytes(a.file),
-      }));
+      const attachments: Array<Record<string, unknown>> = [];
+      const inlineImages: Array<Record<string, unknown>> = [];
+      for (const a of options.attachments) {
+        const item = {
+          name: a.cid ? a.cid : a.name ?? 'attachment',
+          type: a.mime || 'application/octet-stream',
+          data: encodeBase64Bytes(a.file),
+        };
+        if (a.cid) inlineImages.push(item);
+        else attachments.push(item);
+      }
+      if (attachments.length > 0) content.attachments = attachments;
+      if (inlineImages.length > 0) content.inline_images = inlineImages;
     }
+    if (options.headers && Object.keys(options.headers).length > 0) content.headers = { ...options.headers };
 
     const payload: Record<string, unknown> = {
       recipients,
@@ -385,6 +398,7 @@ export class SparkPostEmailConnector
         body: JSON.stringify(body),
       });
     } catch (error) {
+      if (error instanceof ConnectorError) throw error;
       if ((error as Error)?.name === 'AbortError') {
         throw new ConnectorError({
           message: (error as Error).message ?? 'Request cancelled',
@@ -421,15 +435,17 @@ export class SparkPostEmailConnector
 // ---------------------------------------------------------------------------
 
 /**
- * Map SparkPost (HTTP status, errors[0]) to canonical `ProviderCode` per
- * .
+ * Map SparkPost (HTTP status, errors[0]) to canonical `ProviderCode`
+ * (https://developers.sparkpost.com/api/#header-error-codes).
  */
 function mapSparkPostErrorToProviderCode(
   status: number,
   firstError: { message?: string; code?: string; description?: string } | undefined,
 ): ProviderCode {
-  if (status === 401 || status === 403 || status === 420) return 'auth_failed';
-  if (status === 429) return 'rate_limited';
+  if (status === 401 || status === 403) return 'auth_failed';
+  // 420 "Exceed Sending Limit — You exceeded your daily, monthly, or sandbox
+  // sending limit": a quota, not a credential problem.
+  if (status === 429 || status === 420) return 'rate_limited';
   if (status >= 500) return 'provider_unavailable';
   if (status === 413) return 'invalid_request';
   if (status === 422) return 'invalid_request';

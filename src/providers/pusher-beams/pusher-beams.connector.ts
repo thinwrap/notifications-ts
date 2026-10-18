@@ -10,7 +10,7 @@ import type {
 import { ChannelTypeEnum } from '../../types';
 import { ConnectorError } from '../../types';
 import type { ProviderCode } from '../../types';
-import { mergePassthrough } from '../../utils';
+import { encodePathSegment, mergePassthrough } from '../../utils';
 import { parseRetryAfter } from '../../utils';
 import type { PusherBeamsConfig } from './pusher-beams.config';
 import type {
@@ -62,6 +62,7 @@ export class PusherBeamsPushConnector
    * `providerMessage` text, raw header on `cause.retryAfter`.
    */
   async send(input: PusherBeamsPushSendInput): Promise<PushSendResult> {
+    assertBeamsInstanceId(this.config.instanceId);
     const connectorBody = this.synthesizeWirePayload(input);
     const connectorHeaders: Record<string, string> = {
       'Content-Type': 'application/json',
@@ -79,7 +80,7 @@ export class PusherBeamsPushConnector
       input.interests !== undefined ? 'interests' : 'users';
     const baseUrl =
       `https://${this.config.instanceId}.pushnotifications.pusher.com` +
-      `/publish_api/v1/instances/${this.config.instanceId}` +
+      `/publish_api/v1/instances/${encodePathSegment(this.config.instanceId, 'Pusher Beams instanceId')}` +
       `/publishes/${endpointSuffix}`;
 
     let response: Response;
@@ -90,6 +91,7 @@ export class PusherBeamsPushConnector
         body: JSON.stringify(mergedBody),
       });
     } catch (error) {
+      if (error instanceof ConnectorError) throw error;
       if ((error as Error)?.name === 'AbortError') {
         throw new ConnectorError({
           message: (error as Error).message ?? 'Request cancelled',
@@ -140,11 +142,13 @@ export class PusherBeamsPushConnector
   ): Record<string, unknown> {
     const title = input.title;
     const body = input.body;
+    // No title and no body is a data-only push: FCM delivers a data message
+    // when `notification` is absent, and APNs needs `content-available` (with
+    // no `alert`) to wake the app in the background.
+    const dataOnly = title === undefined && body === undefined;
 
     // FCM (Android) payload — Beams nests this under `fcm`.
-    const fcmPayload: Record<string, unknown> = {
-      notification: { title, body },
-    };
+    const fcmPayload: Record<string, unknown> = dataOnly ? {} : { notification: { title, body } };
     if (input.data !== undefined) {
       // FCM wire constraint: data values must be strings.
       fcmPayload.data = stringifyValues(input.data);
@@ -154,19 +158,22 @@ export class PusherBeamsPushConnector
     }
 
     // APNs (iOS) payload — Beams nests this under `apns`.
-    const apsBlock: Record<string, unknown> = { alert: { title, body } };
+    const apsBlock: Record<string, unknown> = dataOnly
+      ? { 'content-available': 1 }
+      : { alert: { title, body } };
     if (input.badge !== undefined) apsBlock.badge = input.badge;
     if (input.sound !== undefined) apsBlock.sound = input.sound;
     const apnsPayload: Record<string, unknown> = { aps: apsBlock };
+    // Beams' APNs format example carries custom metadata as `apns.data`,
+    // a custom key beside `aps` in Apple's payload.
+    if (input.data !== undefined) apnsPayload.data = input.data;
     if (input.ttl !== undefined) {
       apnsPayload['apns-expiration'] =
         Math.floor(Date.now() / 1000) + input.ttl;
     }
 
     // Optional Web push payload. Web preserves original `data` types.
-    const webPayload: Record<string, unknown> = {
-      notification: { title, body },
-    };
+    const webPayload: Record<string, unknown> = dataOnly ? {} : { notification: { title, body } };
     if (input.data !== undefined) webPayload.data = input.data;
 
     const wire: Record<string, unknown> = {
@@ -263,6 +270,7 @@ export class PusherBeamsPushConnector
     options: IPushOptions,
     bridgeProviderData: WithPassthrough<Record<string, unknown>> = {}
   ): Promise<ISendMessageSuccessResponse> {
+    assertBeamsInstanceId(this.config.instanceId);
     const overrides = options.overrides ?? {};
 
     const title = overrides.title ?? options.title;
@@ -285,6 +293,7 @@ export class PusherBeamsPushConnector
 
     if (options.payload && Object.keys(options.payload).length > 0) {
       (payload.fcm as Record<string, unknown>).data = options.payload;
+      (payload.apns as Record<string, unknown>).data = options.payload;
     }
 
     const { body: transformedBody, headers: passthroughHeaders } = mergePassthrough(
@@ -293,7 +302,7 @@ export class PusherBeamsPushConnector
       bridgeProviderData._passthrough,
     );
 
-    const url = `https://${this.config.instanceId}.pushnotifications.pusher.com/publish_api/v1/instances/${this.config.instanceId}/publishes/users`;
+    const url = `https://${this.config.instanceId}.pushnotifications.pusher.com/publish_api/v1/instances/${encodePathSegment(this.config.instanceId, 'Pusher Beams instanceId')}/publishes/users`;
 
     let response: Response;
     try {
@@ -307,6 +316,7 @@ export class PusherBeamsPushConnector
         body: JSON.stringify(transformedBody),
       });
     } catch (error) {
+      if (error instanceof ConnectorError) throw error;
       if ((error as Error)?.name === 'AbortError') {
         throw new ConnectorError({
           message: (error as Error).message ?? 'Request cancelled',
@@ -358,20 +368,42 @@ function stringifyValues(
 }
 
 /**
- * Map Pusher Beams HTTP status to canonical `ProviderCode`.
+ * Map Pusher Beams HTTP status to canonical `ProviderCode`, per the publish
+ * API error table (https://pusher.com/docs/beams/reference/publish-api/):
  *
- *   401              → auth_failed       (bad secret key)
- *   400              → invalid_request   (malformed JSON, missing required fields)
- *   422              → invalid_recipient (invalid interest/user, no subscribers)
- *   429              → rate_limited
- *   500 / 503        → provider_unavailable
- *   *                → unknown
+ *   400 bad content type / missing param / body too large / not JSON → invalid_request
+ *   401 "Incorrect API Key." (and 403)                               → auth_failed
+ *   402 "Publishing blocked due to exceeding plan limits"            → rate_limited (a plan quota)
+ *   404 "Could not find the instance."                               → invalid_request (wrong instanceId)
+ *   413                                                              → invalid_request
+ *   422 "JSON does not our match schema."                            → invalid_request
+ *   429 "Too many requests … (max 100 RPS)"                          → rate_limited
+ *   5xx                                                              → provider_unavailable
+ *   *                                                                → unknown
  */
 function mapPusherBeamsStatusToProviderCode(status: number): ProviderCode {
-  if (status === 401) return 'auth_failed';
-  if (status === 400) return 'invalid_request';
-  if (status === 422) return 'invalid_recipient';
-  if (status === 429) return 'rate_limited';
-  if (status === 500 || status === 503) return 'provider_unavailable';
+  if (status === 401 || status === 403) return 'auth_failed';
+  if (status === 400 || status === 404 || status === 413 || status === 422) return 'invalid_request';
+  if (status === 402 || status === 429) return 'rate_limited';
+  if (status >= 500) return 'provider_unavailable';
   return 'unknown';
+}
+
+const DNS_LABEL = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/;
+
+/**
+ * `instanceId` becomes both the hostname label and a path segment of the URL
+ * the secret key is sent to, so anything but a single DNS label could steer
+ * the credential to another host. Beams IDs are UUIDs in practice, but no Beams
+ * SDK enforces that shape, so only the label rule is checked.
+ */
+function assertBeamsInstanceId(instanceId: string): void {
+  if (typeof instanceId === 'string' && DNS_LABEL.test(instanceId)) return;
+  const message = 'Pusher Beams instanceId must be a single DNS label (letters, digits, hyphens).';
+  throw new ConnectorError({
+    message,
+    statusCode: null,
+    providerCode: 'invalid_request',
+    providerMessage: message,
+  });
 }

@@ -10,7 +10,7 @@ import type {
 import { ChannelTypeEnum } from '../../types';
 import { ConnectorError } from '../../types';
 import type { ProviderCode } from '../../types';
-import { mergePassthrough } from '../../utils';
+import { encodePathSegment, mergePassthrough } from '../../utils';
 import { parseRetryAfter } from '../../utils';
 import type { WhatsAppBusinessConfig } from './whatsapp-business.config';
 import type {
@@ -110,7 +110,7 @@ export class WhatsAppChatConnector
     );
 
     const version = this.config.graphApiVersion ?? DEFAULT_GRAPH_API_VERSION;
-    const url = `https://graph.facebook.com/${version}/${this.config.phoneNumberId}/messages`;
+    const url = `https://graph.facebook.com/${encodePathSegment(version, 'WhatsApp graphApiVersion')}/${encodePathSegment(this.config.phoneNumberId, 'WhatsApp phoneNumberId')}/messages`;
 
     let response: Response;
     try {
@@ -120,6 +120,7 @@ export class WhatsAppChatConnector
         body: JSON.stringify(mergedBody),
       });
     } catch (error) {
+      if (error instanceof ConnectorError) throw error;
       if ((error as Error)?.name === 'AbortError') {
         throw new ConnectorError({
           message: (error as Error).message ?? 'Request cancelled',
@@ -158,13 +159,8 @@ export class WhatsAppChatConnector
    * parsed seconds embedded in `providerMessage` text, raw header preserved on
    * `cause.retryAfter`. Wrapper performs no retry.
    *
-   * Meta error-code reference (https://developers.facebook.com/docs/whatsapp/cloud-api/support/error-codes):
-   *   190             → auth_failed         (access token invalid/expired)
-   *   131008          → invalid_recipient   (recipient not in allowed list)
-   *   131026 / 131047 → invalid_recipient   (24h window expired / re-engagement)
-   *   131051 / 131056 → invalid_request     (unsupported message type / pair-rate)
-   *   80007 / 4 / 80004 → rate_limited     (business / app / throttle quotas)
-   *   1 / 2           → provider_unavailable (temporary Graph API failure)
+   * Meta's `error.code` is matched first, then the HTTP status; see
+   * {@link mapWhatsAppCode} for the table and its sources.
    */
   private mapVendorError(
     statusCode: number,
@@ -181,27 +177,16 @@ export class WhatsAppChatConnector
     const message = errorObj?.message;
 
     const providerCode: ProviderCode =
-      errorCode === 190
+      (typeof errorCode === 'number' ? mapWhatsAppCode(errorCode) : null) ??
+      (statusCode === 401 || statusCode === 403
         ? 'auth_failed'
-        : statusCode === 401
-          ? 'auth_failed'
-          : errorCode === 131008 ||
-              errorCode === 131026 ||
-              errorCode === 131047
-            ? 'invalid_recipient'
-            : errorCode === 80007 || errorCode === 80004 || errorCode === 4
-              ? 'rate_limited'
-              : statusCode === 429
-                ? 'rate_limited'
-                : errorCode === 131051 || errorCode === 131056
-                  ? 'invalid_request'
-                  : statusCode === 400
-                    ? 'invalid_request'
-                    : errorCode === 1 || errorCode === 2
-                      ? 'provider_unavailable'
-                      : statusCode >= 500
-                        ? 'provider_unavailable'
-                        : 'unknown';
+        : statusCode === 429
+          ? 'rate_limited'
+          : statusCode === 400
+            ? 'invalid_request'
+            : statusCode >= 500
+              ? 'provider_unavailable'
+              : 'unknown');
 
     const baseMessage = message ?? `WhatsApp HTTP ${statusCode}`;
 
@@ -244,7 +229,7 @@ export class WhatsAppChatConnector
     let response: Response;
     try {
       response = await this.fetchImpl(
-        `https://graph.facebook.com/${version}/${this.config.phoneNumberId}/messages`,
+        `https://graph.facebook.com/${encodePathSegment(version, 'WhatsApp graphApiVersion')}/${encodePathSegment(this.config.phoneNumberId, 'WhatsApp phoneNumberId')}/messages`,
         {
           method: 'POST',
           headers: {
@@ -256,6 +241,7 @@ export class WhatsAppChatConnector
         }
       );
     } catch (error) {
+      if (error instanceof ConnectorError) throw error;
       if ((error as Error)?.name === 'AbortError') {
         throw new ConnectorError({
           message: (error as Error).message ?? 'Request cancelled',
@@ -284,5 +270,57 @@ export class WhatsAppChatConnector
       id: data.messages![0]!.id,
       date: new Date().toISOString(),
     };
+  }
+}
+
+/**
+ * Meta Cloud API `error.code` → `ProviderCode`, per
+ * https://developers.facebook.com/docs/whatsapp/cloud-api/support/error-codes.
+ * Several entries are counter-intuitive: 131047 ("More than 24 hours have
+ * passed since recipient last replied") needs a template, not a new recipient;
+ * 133010 ("Phone number not registered on the WhatsApp Business Platform") is
+ * the BUSINESS sender number; 131008 is "The request is missing a required
+ * parameter"; 131048/131056 are listed by Meta as rate limits.
+ */
+function mapWhatsAppCode(code: number): ProviderCode | null {
+  if (code >= 200 && code <= 299) return 'auth_failed'; // permission errors
+  switch (code) {
+    case 0: // "We were unable to authenticate the app user"
+    case 3: // capability / permission
+    case 10: // "Permission is either not granted or has been removed"
+    case 190: // "Your access token has expired"
+    case 368: // policy restriction
+    case 131005: // access denied
+    case 131031: // account restricted
+      return 'auth_failed';
+    case 4: // app rate limit
+    case 80007: // WhatsApp Business Account rate limit
+    case 130429: // Cloud API throughput "Rate limit hit"
+    case 131048: // spam rate limit / quality restriction
+    case 131056: // "Too many messages sent from the sender phone number to the same recipient"
+      return 'rate_limited';
+    case 131021: // sender and recipient are the same number
+    case 131026: // message undeliverable (recipient not on WhatsApp, old app, ToS)
+      return 'invalid_recipient';
+    case 100: // invalid parameter
+    case 131008: // required parameter missing
+    case 131009: // parameter value invalid
+    case 131042: // business payment issue
+    case 131045: // phone-number registration error
+    case 131047: // re-engagement: outside the 24h window, send a template
+    case 131051: // unsupported message type
+    case 132000: // template param count mismatch
+    case 132001: // template does not exist
+    case 132012: // template param format mismatch
+    case 133010: // business phone number not registered
+      return 'invalid_request';
+    case 1: // API unknown
+    case 2: // API service
+    case 131000: // "Something went wrong"
+    case 131016: // "A service is temporarily unavailable."
+    case 131057: // account in maintenance mode
+      return 'provider_unavailable';
+    default:
+      return null;
   }
 }

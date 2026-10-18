@@ -34,6 +34,20 @@ endpoint.
 Standard push input. Audience targeting (segments, user IDs) and scheduling
 via `_passthrough.body`.
 
+Field mapping onto WonderPush's `notification` object:
+
+| Input | Wire field |
+|---|---|
+| `title` / `body` | `notification.alert.title` / `notification.alert.text` |
+| `subtitle` | `notification.alert.ios.subtitle` |
+| `badge` | `notification.alert.ios.badge` |
+| `sound` | `notification.alert.ios.sound` and `notification.alert.android.sound` |
+| `data` | `notification.push.custom` (delivered under the payload's `custom` key) |
+
+A `notification` augmentation or `_passthrough.body.notification` is
+deep-merged over these: your leaves win and your other keys are kept
+alongside the derived ones.
+
 ## Error mapping
 
 | Vendor HTTP | Vendor signal | `providerCode` |
@@ -43,7 +57,7 @@ via `_passthrough.body`.
 | 400 | (other) | `invalid_request` |
 | 429 | (any) | `rate_limited` |
 | 5xx | (any) | `provider_unavailable` |
-| network failure | — | `unknown` |
+| network failure | — | `provider_unavailable` |
 
 ## `_passthrough` examples
 

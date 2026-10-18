@@ -98,6 +98,19 @@ describe('ScalewayEmailConnector', () => {
   // Body construction
   // ---------------------------------------------------------------------------
 
+  it.each(['../../secrets', 'fr-par/emails?x=', 'FR-PAR', ''])(
+    'region %j (not region-shaped) → invalid_request; the secret key is never sent',
+    async (region) => {
+      const c = new ScalewayEmailConnector({
+        ...defaultConfig,
+        region: region as unknown as ScalewayConfig['region'],
+      });
+      const err = await c.send({ from: 'a@example.com', to: 'r@example.com', subject: 's', text: 't' }).catch((e: unknown) => e);
+      expect((err as ConnectorError).providerCode).toBe('invalid_request');
+      expect(mockFetch).not.toHaveBeenCalled();
+    },
+  );
+
   it('builds nested from/to address objects, project_id, and senderName', async () => {
     mockFetch.mockResolvedValueOnce(successResponse());
 

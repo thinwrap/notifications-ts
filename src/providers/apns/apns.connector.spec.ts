@@ -203,6 +203,149 @@ describe('ApnsPushConnector', () => {
       expect(headers['apns-push-type']).toBe('background');
     });
 
+    // sending-notification-requests-to-apns, `background`: "Always use priority 5.
+    // Using priority 10 is an error." — and an omitted apns-priority means 10.
+    // pushing-background-updates-to-your-app: the aps dictionary "includes only
+    // the content-available key".
+    it('background push: apns-priority 5 and aps.content-available 1 are added', async () => {
+      mockFetch.mockResolvedValueOnce(apnsSuccessResponse());
+
+      await new ApnsPushConnector(buildConfig()).send({ to: 'd', data: { silent: true } });
+
+      const init = mockFetch.mock.calls[0]![1] as RequestInit;
+      const headers = init.headers as Record<string, string>;
+      expect(headers['apns-push-type']).toBe('background');
+      expect(headers['apns-priority']).toBe('5');
+      const body = JSON.parse(init.body as string) as Record<string, unknown>;
+      expect(body.aps).toEqual({ 'content-available': 1 });
+      expect(body.silent).toBe(true);
+    });
+
+    // sending-notification-requests-to-apns: `alert` is "The push type for
+    // notifications that trigger a user interaction—for example, an alert,
+    // badge, or sound".
+    it.each([
+      [{ badge: 3 }, { badge: 3 }],
+      [{ sound: 'default' }, { sound: 'default' }],
+      [{ badge: 0 }, { badge: 0 }],
+    ])('a badge/sound-only push %o is an alert push, with no priority 5 or content-available', async (input, aps) => {
+      mockFetch.mockResolvedValueOnce(apnsSuccessResponse());
+      await new ApnsPushConnector(buildConfig()).send({ to: 'd', ...input });
+      const init = mockFetch.mock.calls[0]![1] as RequestInit;
+      const headers = init.headers as Record<string, string>;
+      expect(headers['apns-push-type']).toBe('alert');
+      expect(headers['apns-priority']).toBeUndefined();
+      expect((JSON.parse(init.body as string) as { aps: unknown }).aps).toEqual(aps);
+    });
+
+    it('a caller-set background push type wins, and priority/content-available follow it', async () => {
+      mockFetch.mockResolvedValueOnce(apnsSuccessResponse());
+      await new ApnsPushConnector(buildConfig()).send({
+        to: 'd',
+        badge: 1,
+        _passthrough: { headers: { 'apns-push-type': 'background' } },
+      });
+      const init = mockFetch.mock.calls[0]![1] as RequestInit;
+      const headers = init.headers as Record<string, string>;
+      expect(headers['apns-push-type']).toBe('background');
+      expect(headers['apns-priority']).toBe('5');
+      expect((JSON.parse(init.body as string) as { aps: Record<string, unknown> }).aps['content-available']).toBe(1);
+    });
+
+    it('background push keeps a caller-set apns-priority and content-available', async () => {
+      mockFetch.mockResolvedValueOnce(apnsSuccessResponse());
+
+      await new ApnsPushConnector(buildConfig()).send({
+        to: 'd',
+        apnsPushType: 'background',
+        apnsPriority: 10,
+        aps: { 'content-available': 0 },
+      });
+
+      const init = mockFetch.mock.calls[0]![1] as RequestInit;
+      expect((init.headers as Record<string, string>)['apns-priority']).toBe('10');
+      expect((JSON.parse(init.body as string) as { aps: unknown }).aps).toEqual({ 'content-available': 0 });
+    });
+
+    it('an alert supplied only through _passthrough.body.aps is sent as push-type alert (no priority 5)', async () => {
+      mockFetch.mockResolvedValueOnce(apnsSuccessResponse());
+
+      await new ApnsPushConnector(buildConfig()).send({
+        to: 'd',
+        _passthrough: { body: { aps: { alert: { title: 'From passthrough' } } } },
+      });
+
+      const init = mockFetch.mock.calls[0]![1] as RequestInit;
+      const headers = init.headers as Record<string, string>;
+      expect(headers['apns-push-type']).toBe('alert');
+      expect(headers['apns-priority']).toBeUndefined();
+      expect((JSON.parse(init.body as string) as { aps: Record<string, unknown> }).aps).not.toHaveProperty(
+        'content-available',
+      );
+    });
+
+    // Apple payload key reference: `alert` is "a string or a dictionary".
+    it('a string input.aps.alert is sent verbatim (never spread into {"0":…})', async () => {
+      mockFetch.mockResolvedValueOnce(apnsSuccessResponse());
+      await new ApnsPushConnector(buildConfig()).send({ to: 'd', aps: { alert: 'Hi there' } });
+      const init = mockFetch.mock.calls[0]![1] as RequestInit;
+      expect((JSON.parse(init.body as string) as { aps: unknown }).aps).toEqual({ alert: 'Hi there' });
+      expect((init.headers as Record<string, string>)['apns-push-type']).toBe('alert');
+    });
+
+    it('a string input.aps.alert becomes alert.body when a typed title is also set', async () => {
+      mockFetch.mockResolvedValueOnce(apnsSuccessResponse());
+      await new ApnsPushConnector(buildConfig()).send({ to: 'd', title: 'T', aps: { alert: 'B' } });
+      const init = mockFetch.mock.calls[0]![1] as RequestInit;
+      expect((JSON.parse(init.body as string) as { aps: unknown }).aps).toEqual({ alert: { body: 'B', title: 'T' } });
+    });
+
+    it('an alert supplied only through input.aps.alert is sent as push-type alert', async () => {
+      mockFetch.mockResolvedValueOnce(apnsSuccessResponse());
+
+      await new ApnsPushConnector(buildConfig()).send({ to: 'd', aps: { alert: { body: 'x' } } });
+
+      const headers = (mockFetch.mock.calls[0]![1] as RequestInit).headers as Record<string, string>;
+      expect(headers['apns-push-type']).toBe('alert');
+    });
+
+    it('a passthrough apns-push-type header (any case) wins over inference', async () => {
+      mockFetch.mockResolvedValueOnce(apnsSuccessResponse());
+
+      await new ApnsPushConnector(buildConfig()).send({
+        to: 'd',
+        _passthrough: { headers: { 'APNS-Push-Type': 'location' } },
+      });
+
+      const headers = (mockFetch.mock.calls[0]![1] as RequestInit).headers as Record<string, string>;
+      expect(headers['APNS-Push-Type']).toBe('location');
+      expect(headers['apns-push-type']).toBeUndefined();
+      expect(headers['apns-priority']).toBeUndefined();
+    });
+
+    it('an unusable privateKey → ConnectorError(auth_failed) naming no key material; nothing sent', async () => {
+      const connector = new ApnsPushConnector(buildConfig({ privateKey: 'not-a-pem-value' }));
+      const err = await connector.send({ to: 'd', title: 't' }).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(ConnectorError);
+      const ce = err as ConnectorError;
+      expect(ce.providerCode).toBe('auth_failed');
+      expect(ce.message).not.toContain('not-a-pem-value');
+      expect(JSON.stringify(ce.cause)).not.toContain('not-a-pem-value');
+      expect(mockFetch).not.toHaveBeenCalled();
+
+      const err2 = await connector
+        .sendMessage({
+          target: ['d'],
+          title: 't',
+          content: 'c',
+          payload: {},
+          subscriber: {},
+          step: { digest: false, events: undefined, total_count: undefined },
+        })
+        .catch((e: unknown) => e);
+      expect((err2 as ConnectorError).providerCode).toBe('auth_failed');
+    });
+
     it('input.apnsPriority + apnsCollapseId emitted as headers when set', async () => {
       mockFetch.mockResolvedValueOnce(apnsSuccessResponse());
 
@@ -430,7 +573,10 @@ describe('ApnsPushConnector', () => {
         [410, 'Unregistered', 'invalid_recipient'],
         [413, 'PayloadTooLarge', 'invalid_request'],
         [429, 'TooManyRequests', 'rate_limited'],
+        // "The provider's authentication token is being updated too often."
+        [429, 'TooManyProviderTokenUpdates', 'auth_failed'],
         [500, 'InternalServerError', 'provider_unavailable'],
+        [502, 'BadGateway', 'provider_unavailable'],
         [503, 'ServiceUnavailable', 'provider_unavailable'],
         [503, 'Shutdown', 'provider_unavailable'],
       ])(
@@ -501,6 +647,14 @@ describe('ApnsPushConnector', () => {
     // Retry-After parsing
     // -------------------------------------------------------------------------
 
+    it('429 TooManyProviderTokenUpdates names tokenCache as the fix', async () => {
+      mockFetch.mockResolvedValueOnce(apnsErrorResponse(429, { reason: 'TooManyProviderTokenUpdates' }));
+      const err = await new ApnsPushConnector(buildConfig()).send({ to: 'd', title: 't' }).catch((e: unknown) => e);
+      expect((err as ConnectorError).providerCode).toBe('auth_failed');
+      expect((err as ConnectorError).providerMessage).toContain('tokenCache');
+      expect((err as ConnectorError).providerMessage).toContain('20 minutes');
+    });
+
     describe('Retry-After surfacing (, retry is consumer policy)', () => {
       it('parses integer Retry-After into cause.retryAfter and cause.retryAfterSeconds', async () => {
         mockFetch.mockResolvedValueOnce(
@@ -560,6 +714,18 @@ describe('ApnsPushConnector', () => {
       subscriber: {},
       step: { digest: false, events: undefined, total_count: undefined },
     };
+
+    it('reuses a tokenCache hit like .send() (APNs rejects token churn under 20 min)', async () => {
+      mockFetch.mockResolvedValueOnce(apnsSuccessResponse());
+      const hook = createTokenCacheMock({
+        [CACHE_KEY]: { token: 'cached.jwt.value', expiresAt: Date.now() + 60_000 },
+      });
+
+      await new ApnsPushConnector(buildConfig({ tokenCache: hook })).sendMessage({ ...defaultOptions });
+
+      const headers = (mockFetch.mock.calls[0]![1] as RequestInit).headers as Record<string, string>;
+      expect(headers.authorization).toBe('bearer cached.jwt.value');
+    });
 
     it('signs a fresh JWT and POSTs the APNs message (production env)', async () => {
       mockFetch.mockResolvedValueOnce(apnsSuccessResponse('apns-uuid-123'));
@@ -642,7 +808,18 @@ describe('ApnsPushConnector', () => {
         const e = err as ConnectorError;
         expect(e.message).toBe('All 1 APNs message(s) failed to send');
         expect(e.providerMessage).toContain('BadDeviceToken');
+        expect(e.providerCode).toBe('invalid_recipient');
+        expect(e.statusCode).toBe(400);
       }
+    });
+
+    it('all targets failing with 429 TooManyProviderTokenUpdates keeps auth_failed (not a synthetic 500)', async () => {
+      mockFetch.mockResolvedValueOnce(apnsErrorResponse(429, { reason: 'TooManyProviderTokenUpdates' }));
+      const err = (await new ApnsPushConnector(buildConfig())
+        .sendMessage({ ...defaultOptions })
+        .catch((e: unknown) => e)) as ConnectorError;
+      expect(err.providerCode).toBe('auth_failed');
+      expect(err.statusCode).toBe(429);
     });
 
     it('includes custom payload data in the APNs body', async () => {

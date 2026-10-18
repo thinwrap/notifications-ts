@@ -10,7 +10,7 @@ import type {
 import { ChannelTypeEnum } from '../../types';
 import { ConnectorError } from '../../types';
 import type { ProviderCode } from '../../types';
-import { mergePassthrough } from '../../utils';
+import { allTargetsFailedError, mergePassthrough } from '../../utils';
 import { parseRetryAfter } from '../../utils';
 import type { ApnsConfig } from './apns.config';
 import type {
@@ -102,6 +102,7 @@ export class ApnsPushConnector
       connectorHeaders,
       input._passthrough,
     );
+    finalizePushType(mergedBody, mergedHeaders);
 
     const host =
       this.config.env === 'production'
@@ -117,6 +118,7 @@ export class ApnsPushConnector
         body: JSON.stringify(mergedBody),
       });
     } catch (error) {
+      if (error instanceof ConnectorError) throw error;
       if ((error as Error)?.name === 'AbortError') {
         throw new ConnectorError({
           message: (error as Error).message ?? 'Request cancelled',
@@ -210,12 +212,18 @@ export class ApnsPushConnector
       input.body !== undefined ||
       input.aps?.alert !== undefined
     ) {
-      const alert: { title?: string; body?: string; subtitle?: string } = {
-        ...(input.aps?.alert ?? {}),
-      };
-      if (input.title !== undefined) alert.title = input.title;
-      if (input.body !== undefined) alert.body = input.body;
-      aps.alert = alert;
+      const typedAlert = input.aps?.alert;
+      if (typeof typedAlert === 'string' && input.title === undefined && input.body === undefined) {
+        // Apple allows `alert` as a plain string (the body text): send it
+        // verbatim. Spreading it would produce `{"0":"H","1":"i",…}`.
+        aps.alert = typedAlert;
+      } else {
+        const alert: { title?: string; body?: string; subtitle?: string } =
+          typeof typedAlert === 'string' ? { body: typedAlert } : { ...(typedAlert ?? {}) };
+        if (input.title !== undefined) alert.title = input.title;
+        if (input.body !== undefined) alert.body = input.body;
+        aps.alert = alert;
+      }
     }
 
     if (input.sound !== undefined) aps.sound = input.sound;
@@ -244,9 +252,11 @@ export class ApnsPushConnector
   }
 
   /**
-   * Build the per-request APNs HTTP/2 headers. Authorization, apns-topic,
-   * apns-push-type are always present. apns-priority / apns-expiration /
-   * apns-collapse-id are emitted only when the consumer set them.
+   * Build the per-request APNs HTTP/2 headers. Authorization and apns-topic
+   * are always present; apns-push-type is set here only when the caller chose
+   * it, otherwise {@link finalizePushType} infers it from the merged body.
+   * apns-priority / apns-expiration / apns-collapse-id are emitted only when
+   * the consumer set them (plus the priority 5 a background push requires).
    */
   private buildApnsHeaders(
     input: ApnsPushSendInput,
@@ -255,13 +265,9 @@ export class ApnsPushConnector
     const headers: Record<string, string> = {
       authorization: `bearer ${jwt}`,
       'apns-topic': input.apnsTopic ?? this.config.bundleId,
-      'apns-push-type':
-        input.apnsPushType ??
-        (input.title !== undefined || input.body !== undefined
-          ? 'alert'
-          : 'background'),
       'content-type': 'application/json',
     };
+    if (input.apnsPushType !== undefined) headers['apns-push-type'] = input.apnsPushType;
 
     if (input.apnsPriority !== undefined) {
       headers['apns-priority'] = String(input.apnsPriority);
@@ -297,7 +303,14 @@ export class ApnsPushConnector
     responseHeaders: Headers,
   ): ConnectorError {
     const reason = body?.reason ?? '';
-    const message = reason || `APNs HTTP ${status}`;
+    // Apple: "Update the authentication token no more than once every 20
+    // minutes." A stateless wrapper mints a new JWT per call, so the only fix
+    // is a shared `tokenCache`; the message says so.
+    const message =
+      status === 429 && reason === TOO_MANY_TOKEN_UPDATES
+        ? `${reason}: APNs accepts a new provider token at most once every 20 minutes. ` +
+          'Supply ApnsConfig.tokenCache (shared across connector instances) so the JWT is reused.'
+        : reason || `APNs HTTP ${status}`;
 
     const providerCode = mapApnsErrorToProviderCode(status, reason);
 
@@ -324,8 +337,9 @@ export class ApnsPushConnector
   // ---------------------------------------------------------------------------
 
   /**
-   * Mints a fresh JWT on every call, like the FCM equivalent — this surface takes no
-   * `tokenCache` hook, so consumers wanting the signing cost amortized use `.send()`.
+   * Resolves the JWT through `config.tokenCache` exactly like `.send()`: APNs
+   * rejects a provider token that changes more than once per 20 minutes, so
+   * this surface must not mint its own.
    *
    * Unlike `.send()`, which is single-recipient, this dispatches to multiple targets
    * via `Promise.allSettled` to match the Novu `IPushProvider` contract.
@@ -335,11 +349,7 @@ export class ApnsPushConnector
     bridgeProviderData: WithPassthrough<Record<string, unknown>> = {},
   ): Promise<ISendMessageSuccessResponse> {
     this.assertHttp2Transport();
-    const jwt = createApnsJwt(
-      this.config.keyId,
-      this.config.teamId,
-      this.config.privateKey,
-    );
+    const jwt = await this.getJwtViaHookOrFresh();
 
     const overrides = options.overrides ?? {};
 
@@ -365,11 +375,16 @@ export class ApnsPushConnector
       }
     }
 
-    const { body: transformedPayload, headers: passthroughHeaders } = mergePassthrough(
+    const { body: transformedPayload, headers: requestHeaders } = mergePassthrough(
       apnsPayload as unknown as Record<string, unknown>,
-      {},
+      {
+        authorization: `bearer ${jwt}`,
+        'apns-topic': this.config.bundleId,
+        'content-type': 'application/json',
+      },
       bridgeProviderData._passthrough,
     );
+    finalizePushType(transformedPayload, requestHeaders);
 
     const host =
       this.config.env === 'production'
@@ -383,16 +398,11 @@ export class ApnsPushConnector
         try {
           response = await this.fetchImpl(url, {
             method: 'POST',
-            headers: {
-              authorization: `bearer ${jwt}`,
-              'apns-topic': this.config.bundleId,
-              'apns-push-type': 'alert',
-              'content-type': 'application/json',
-              ...passthroughHeaders,
-            },
+            headers: requestHeaders,
             body: JSON.stringify(transformedPayload),
           });
         } catch (error) {
+          if (error instanceof ConnectorError) throw error;
           if ((error as Error)?.name === 'AbortError') {
             throw new ConnectorError({
               message: (error as Error).message ?? 'Request cancelled',
@@ -421,6 +431,7 @@ export class ApnsPushConnector
     );
 
     const ids: string[] = [];
+    const reasons: unknown[] = [];
     let allFailed = true;
 
     for (const result of results) {
@@ -429,6 +440,7 @@ export class ApnsPushConnector
         allFailed = false;
       } else {
         const err = result.reason;
+        reasons.push(err);
         ids.push(
           err instanceof ConnectorError
             ? err.providerMessage ?? err.message
@@ -437,13 +449,7 @@ export class ApnsPushConnector
       }
     }
 
-    if (allFailed) {
-      throw new ConnectorError({
-        message: `All ${options.target.length} APNs message(s) failed to send`,
-        statusCode: 500,
-        providerMessage: ids.join('; '),
-      });
-    }
+    if (allFailed) throw allTargetsFailedError('APNs', reasons, ids);
 
     return {
       ids,
@@ -458,6 +464,7 @@ export class ApnsPushConnector
 
 /**
  * Map APNs (HTTP status, response `reason` field) to canonical `ProviderCode`.
+ * https://developer.apple.com/documentation/usernotifications/handling-notification-responses-from-apns
  *
  *   400 BadDeviceToken                                  → invalid_recipient
  *   400 other (PayloadTooLarge/BadTopic/...)            → invalid_request
@@ -465,9 +472,9 @@ export class ApnsPushConnector
  *   403 InvalidProviderToken/Missing.../Expired...      → auth_failed
  *   410 Unregistered                                    → invalid_recipient
  *   413 PayloadTooLarge                                 → invalid_request
+ *   429 TooManyProviderTokenUpdates                     → auth_failed
  *   429 TooManyRequests                                 → rate_limited
- *   500 InternalServerError                             → provider_unavailable
- *   503 ServiceUnavailable / Shutdown                   → provider_unavailable
+ *   5xx InternalServerError / ServiceUnavailable / ...  → provider_unavailable
  *   other                                               → unknown
  */
 function mapApnsErrorToProviderCode(
@@ -480,20 +487,62 @@ function mapApnsErrorToProviderCode(
   }
   if (status === 403) {
     if (reason === 'BadDeviceToken') return 'invalid_recipient';
-    if (
-      reason === 'InvalidProviderToken' ||
-      reason === 'MissingProviderToken' ||
-      reason === 'ExpiredProviderToken'
-    ) {
-      return 'auth_failed';
-    }
     return 'auth_failed';
   }
   if (status === 410) return 'invalid_recipient';
   if (status === 413) return 'invalid_request';
+  // Retrying does not clear this one: without a shared token cache every
+  // retry mints another new JWT and re-triggers it.
+  if (status === 429 && reason === TOO_MANY_TOKEN_UPDATES) return 'auth_failed';
   if (status === 429) return 'rate_limited';
-  if (status === 500) return 'provider_unavailable';
-  if (status === 503) return 'provider_unavailable';
+  if (status >= 500) return 'provider_unavailable';
   return 'unknown';
 }
 
+const TOO_MANY_TOKEN_UPDATES = 'TooManyProviderTokenUpdates';
+
+/**
+ * Resolve `apns-push-type` from the MERGED body when the caller did not set
+ * it (typed field or passthrough header), and apply what Apple requires of a
+ * background push. From "sending-notification-requests-to-apns": for
+ * `background`, "Always use priority 5. Using priority 10 is an error", and an
+ * omitted `apns-priority` defaults to 10. "pushing-background-updates-to-your-app":
+ * the `aps` dictionary "includes only the content-available key".
+ *
+ * Inference looks at `aps.alert` / `aps.badge` / `aps.sound` in the merged
+ * body, so one supplied only through `input.aps` or `_passthrough.body.aps`
+ * still makes the push an `alert`.
+ */
+function finalizePushType(
+  body: Record<string, unknown>,
+  headers: Record<string, string>,
+): void {
+  const existing = findHeader(headers, 'apns-push-type');
+  let pushType: string;
+  if (existing !== undefined) {
+    pushType = headers[existing]!;
+  } else {
+    const aps = isRecord(body.aps) ? body.aps : undefined;
+    // Apple: `alert` is "the push type for notifications that trigger a user
+    // interaction—for example, an alert, badge, or sound". A badge- or
+    // sound-only push is therefore an alert push, not a silent one.
+    const interactive =
+      aps !== undefined && (aps.alert !== undefined || aps.badge !== undefined || aps.sound !== undefined);
+    pushType = interactive ? 'alert' : 'background';
+    headers['apns-push-type'] = pushType;
+  }
+
+  if (pushType !== 'background') return;
+  if (findHeader(headers, 'apns-priority') === undefined) headers['apns-priority'] = '5';
+  const aps = isRecord(body.aps) ? body.aps : {};
+  if (aps['content-available'] === undefined) aps['content-available'] = 1;
+  body.aps = aps;
+}
+
+function findHeader(headers: Record<string, string>, name: string): string | undefined {
+  return Object.keys(headers).find((k) => k.toLowerCase() === name);
+}
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return v !== null && typeof v === 'object' && !Array.isArray(v);
+}

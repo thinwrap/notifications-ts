@@ -4,7 +4,11 @@ import type { ChannelTypeEnum } from './channel.enum';
 export interface EmailAttachment {
   filename: string;
   contentType?: string;
-  content: string | Buffer;
+  /**
+   * A string is sent as its UTF-8 bytes. Bytes are typed as `Uint8Array` (a
+   * Node `Buffer` is one) so the public types do not require `@types/node`.
+   */
+  content: string | Uint8Array;
   contentId?: string;
 }
 

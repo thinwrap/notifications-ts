@@ -105,6 +105,25 @@ describe('SinchSmsConnector', () => {
       expect(url).toBe('https://eu.sms.api.sinch.com/xms/v1/plan-123/batches');
     });
 
+    // SMS API reference servers: https://{region}.sms.api.sinch.com with
+    // region us (default), eu, au, br, ca.
+    it.each(['au', 'br', 'ca'] as const)('region: "%s" routes to https://%s.sms.api.sinch.com', async (region) => {
+      mockFetch.mockResolvedValueOnce(successResponse());
+      await new SinchSmsConnector({ ...defaultConfig, region }).send({ to: '+15559876543', body: 'Hi' });
+      expect(mockFetch.mock.calls[0]![0]).toBe(`https://${region}.sms.api.sinch.com/xms/v1/plan-123/batches`);
+    });
+
+    it.each(['evil.example.com/x', 'uk', ''])('region %j → invalid_request, token never sent', async (region) => {
+      const c = new SinchSmsConnector({ ...defaultConfig, region: region as unknown as SinchConfig['region'] });
+      const e1 = await c.send({ to: '+15559876543', body: 'Hi' }).catch((e: unknown) => e);
+      const e2 = await c.sendMessage({ to: '+15559876543', content: 'Hi' }).catch((e: unknown) => e);
+      for (const e of [e1, e2]) {
+        expect(e).toBeInstanceOf(ConnectorError);
+        expect((e as ConnectorError).providerCode).toBe('invalid_request');
+      }
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
     it('uses per-call from when provided, overriding config.from', async () => {
       mockFetch.mockResolvedValueOnce(successResponse());
 

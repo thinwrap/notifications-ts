@@ -18,8 +18,38 @@ import type {
   OneSignalSendResponse,
 } from './one-signal.types';
 
-const ONE_SIGNAL_ENDPOINT =
+/**
+ * OneSignal serves two key generations on different hosts. App API keys
+ * (`os_v2_…`, the only kind creatable since Nov 2024) authenticate against
+ * `api.onesignal.com` with `Authorization: Key <key>`; legacy REST API keys
+ * against `onesignal.com/api/v1` with `Authorization: Basic <key>`.
+ */
+const ONE_SIGNAL_ENDPOINT = 'https://api.onesignal.com/notifications?c=push';
+const ONE_SIGNAL_LEGACY_ENDPOINT =
   'https://onesignal.com/api/v1/notifications';
+
+/**
+ * Every targeting parameter OneSignal accepts. The segment and alias targets
+ * are documented as not combinable with any other targeting parameter, so a
+ * caller who sets any of these (as an augmentation or in `_passthrough.body`)
+ * must not also receive the connector's default `include_subscription_ids`.
+ */
+const TARGETING_KEYS = [
+  'include_aliases',
+  'include_subscription_ids',
+  'included_segments',
+  'excluded_segments',
+  'filters',
+  'include_player_ids',
+  'include_external_user_ids',
+  'include_email_tokens',
+  'include_phone_numbers',
+] as const;
+
+function hasTargeting(body: Record<string, unknown> | undefined): boolean {
+  if (!body) return false;
+  return TARGETING_KEYS.some((key) => body[key] !== undefined);
+}
 
 /**
  * Marker substrings used by OneSignal's 200-with-errors path. When the
@@ -53,26 +83,30 @@ export class OneSignalPushConnector
    *   - `contents: { en: input.body }` (overridable via augmentation `contents`)
    *   - Recipient routing: by default `include_subscription_ids: [input.to]`.
    *     Any augmentation recipient field (`include_external_user_ids`,
-   *     `include_player_ids`, `included_segments`, `excluded_segments`)
-   *     wins — when set, `include_subscription_ids` is omitted entirely.
+   *     `include_player_ids`, `included_segments`, `excluded_segments`) or
+   *     any targeting key in `_passthrough.body` (see `TARGETING_KEYS`)
+   *     wins — when set, the default `include_subscription_ids` is omitted.
    *   - Augmentation fields forwarded verbatim (snake_case literals).
    *
-   * Auth: `Authorization: Basic <restApiKey>` per OneSignal REST API v1
-   * (the REST API key is the credential portion; no base64 wrapping).
+   * Endpoint + auth by key generation (see `ONE_SIGNAL_ENDPOINT`): an
+   * `os_v2_` App API key goes to `api.onesignal.com` as `Key <key>`, any
+   * other key to the legacy v1 host as `Basic <key>` (the key itself, no
+   * base64 wrapping).
    *
-   * Response handling (-7): HTTP 200 with `id` and no error markers ->
-   * success. HTTP 200 with `errors` array carrying an invalid-recipient
-   * marker -> `ConnectorError({ providerCode: 'invalid_recipient' })`.
-   * HTTP 200 with `errors` as an object (`invalid_external_user_ids: [...]`)
-   * -> same. Missing `id` on 200 -> `invalid_request`.
+   * Response handling: HTTP 200 with an `id` -> success, even when `errors`
+   * lists some invalid recipients (kept on `raw.errors`). HTTP 200 with no
+   * `id` and an invalid-recipient `errors` array/object ->
+   * `ConnectorError({ providerCode: 'invalid_recipient' })`; any other
+   * missing `id` -> `invalid_request`.
    */
   async send(input: OneSignalNarrowedInput): Promise<PushSendResult> {
     const connectorBody = this.buildBody(input);
+    const { url, authorization } = this.endpointFor(this.config.apiKey);
 
     const connectorHeaders: Record<string, string> = {
       'Content-Type': 'application/json',
       Accept: 'application/json',
-      Authorization: `Basic ${this.config.apiKey}`,
+      Authorization: authorization,
     };
 
     const { body: mergedBody, headers: mergedHeaders } =
@@ -84,12 +118,13 @@ export class OneSignalPushConnector
 
     let response: Response;
     try {
-      response = await this.fetchImpl(ONE_SIGNAL_ENDPOINT, {
+      response = await this.fetchImpl(url, {
         method: 'POST',
         headers: mergedHeaders,
         body: JSON.stringify(mergedBody),
       });
     } catch (error) {
+      if (error instanceof ConnectorError) throw error;
       if ((error as Error)?.name === 'AbortError') {
         throw new ConnectorError({
           message: (error as Error).message ?? 'Request cancelled',
@@ -116,9 +151,12 @@ export class OneSignalPushConnector
 
     const raw = (await response.json()) as OneSignalSendResponse;
 
-    // 200-with-errors path: OneSignal returns HTTP 200 even when all
-    // recipients are invalid. Inspect `errors` and map.
-    if (raw.errors !== undefined) {
+    // 200-with-errors path: OneSignal answers HTTP 200 even when every
+    // recipient is invalid, and then returns no notification `id`. A 200 WITH
+    // an `id` was created and delivered to the valid recipients, even if
+    // `errors` lists some invalid ones — that is a success (the list stays on
+    // `raw.errors`), not a throw.
+    if (!raw.id && raw.errors !== undefined) {
       const ticketError = this.mapTicketError(raw, response.status);
       if (ticketError) throw ticketError;
     }
@@ -156,6 +194,7 @@ export class OneSignalPushConnector
       input.include_player_ids !== undefined ||
       input.included_segments !== undefined ||
       input.excluded_segments !== undefined;
+    const passthroughTargets = hasTargeting(input._passthrough?.body);
 
     if (hasAugmentationRecipient) {
       if (input.include_external_user_ids !== undefined) {
@@ -170,7 +209,7 @@ export class OneSignalPushConnector
       if (input.excluded_segments !== undefined) {
         body.excluded_segments = input.excluded_segments;
       }
-    } else if (input.to !== undefined) {
+    } else if (input.to !== undefined && !passthroughTargets) {
       body.include_subscription_ids = [input.to];
     }
 
@@ -205,6 +244,13 @@ export class OneSignalPushConnector
     if (input.collapse_id !== undefined) body.collapse_id = input.collapse_id;
 
     return body;
+  }
+
+  /** Resolve the endpoint + Authorization header for the key's generation. */
+  private endpointFor(apiKey: string): { url: string; authorization: string } {
+    return apiKey.startsWith('os_v2_')
+      ? { url: ONE_SIGNAL_ENDPOINT, authorization: `Key ${apiKey}` }
+      : { url: ONE_SIGNAL_LEGACY_ENDPOINT, authorization: `Basic ${apiKey}` };
   }
 
   /**
@@ -310,9 +356,11 @@ export class OneSignalPushConnector
       app_id: this.config.appId,
       contents: { en: overrides.body ?? options.content },
       headings: { en: overrides.title ?? options.title },
-      include_subscription_ids: options.target,
       target_channel: 'push',
     };
+    if (!hasTargeting(bridgeProviderData._passthrough?.body)) {
+      payload.include_subscription_ids = options.target;
+    }
 
     if (options.payload && Object.keys(options.payload).length > 0) {
       payload.data = options.payload;
@@ -324,19 +372,21 @@ export class OneSignalPushConnector
       bridgeProviderData._passthrough,
     );
 
+    const { url, authorization } = this.endpointFor(this.config.apiKey);
+
     let response: Response;
     try {
-      response = await this.fetchImpl(ONE_SIGNAL_ENDPOINT, {
+      response = await this.fetchImpl(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          // both surfaces use the same Authorization: Basic header.
-          Authorization: `Basic ${this.config.apiKey}`,
+          Authorization: authorization,
           ...passthroughHeaders,
         },
         body: JSON.stringify(body),
       });
     } catch (error) {
+      if (error instanceof ConnectorError) throw error;
       if ((error as Error)?.name === 'AbortError') {
         throw new ConnectorError({
           message: (error as Error).message ?? 'Request cancelled',

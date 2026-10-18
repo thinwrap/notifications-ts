@@ -75,7 +75,12 @@ export function mergeHeaders(
   return result;
 }
 
-function deepMergeBody(
+/**
+ * Recursively merge plain objects, `source` winning at the leaves. Arrays and
+ * non-plain values replace rather than merge; `undefined` in `source` is
+ * skipped so it never erases a connector-set value.
+ */
+export function deepMergeBody(
   target: Record<string, unknown>,
   source: Record<string, unknown>,
 ): Record<string, unknown> {

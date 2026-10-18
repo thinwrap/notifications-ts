@@ -237,13 +237,94 @@ describe('FcmPushConnector', () => {
         message: Record<string, unknown>;
       };
       expect(body.message.topic).toBe('breaking-news');
-      expect(body.message.token).toBe('device-token-1');
+      // FCM Message targets are "mutually exclusive fields. At most one of the
+      // fields will be set" — the passthrough topic replaces the seeded token.
+      expect(body.message.token).toBeUndefined();
 
       const headers = reqInit.headers as Record<string, string>;
       expect(headers['X-Custom']).toBe('v');
       // Authorization is preserved (passthrough doesn't clobber connector headers
       // because connector headers come first; passthrough wins for duplicates).
       expect(headers.Authorization).toBe('Bearer tk');
+    });
+
+    // projects.messages: "Target to send a message to. The following is a list
+    // of mutually exclusive fields. At most one of the fields will be set":
+    // token, fid, topic, condition.
+    it.each([
+      [{ condition: "'a' in topics" }, 'condition'],
+      [{ fid: 'fid-123' }, 'fid'],
+    ] as const)('a passthrough %o target drops the seeded token', async (target, key) => {
+      mockFetch
+        .mockResolvedValueOnce(oauthSuccessResponse())
+        .mockResolvedValueOnce(fcmSuccessResponse());
+      await new FcmPushConnector(buildConfig()).send({
+        to: 'device-token-1',
+        title: 'T',
+        _passthrough: { body: { message: { ...target } } },
+      });
+      const msg = (JSON.parse((mockFetch.mock.calls[1]![1] as RequestInit).body as string) as {
+        message: Record<string, unknown>;
+      }).message;
+      expect(msg[key]).toBe((target as Record<string, string>)[key]);
+      expect(msg).not.toHaveProperty('token');
+    });
+
+    it('an empty `to` sends no token field (topic-only send)', async () => {
+      mockFetch
+        .mockResolvedValueOnce(oauthSuccessResponse())
+        .mockResolvedValueOnce(fcmSuccessResponse());
+      await new FcmPushConnector(buildConfig()).send({
+        to: '',
+        title: 'T',
+        _passthrough: { body: { message: { topic: 'news' } } },
+      });
+      const msg = (JSON.parse((mockFetch.mock.calls[1]![1] as RequestInit).body as string) as {
+        message: Record<string, unknown>;
+      }).message;
+      expect(msg).toEqual(expect.objectContaining({ topic: 'news' }));
+      expect(msg).not.toHaveProperty('token');
+    });
+
+    it('an unusable privateKey → ConnectorError(auth_failed) naming no key material; nothing sent', async () => {
+      const connector = new FcmPushConnector(buildConfig({ privateKey: 'not-a-pem-value' }));
+      const err = await connector.send({ to: 't', title: 'T' }).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(ConnectorError);
+      const ce = err as ConnectorError;
+      expect(ce.providerCode).toBe('auth_failed');
+      expect(ce.message).not.toContain('not-a-pem-value');
+      expect(JSON.stringify(ce.cause)).not.toContain('not-a-pem-value');
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it('an OAuth transport failure → ConnectorError(provider_unavailable), not a raw rejection', async () => {
+      mockFetch.mockRejectedValueOnce(new TypeError('fetch failed'));
+      const err = await new FcmPushConnector(buildConfig()).send({ to: 't', title: 'T' }).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(ConnectorError);
+      expect((err as ConnectorError).providerCode).toBe('provider_unavailable');
+    });
+
+    // Google's token endpoint: invalid_grant / invalid_client are 400/401;
+    // a 429 or 5xx is the endpoint, not the credential.
+    it.each([
+      [400, 'auth_failed'],
+      [401, 'auth_failed'],
+      [429, 'rate_limited'],
+      [500, 'provider_unavailable'],
+      [503, 'provider_unavailable'],
+    ] as const)('OAuth token exchange HTTP %i → %s', async (status, expected) => {
+      mockFetch.mockResolvedValueOnce(new Response('{"error":"x"}', { status }));
+      const err = await new FcmPushConnector(buildConfig()).send({ to: 't', title: 'T' }).catch((e: unknown) => e);
+      expect((err as ConnectorError).providerCode).toBe(expected);
+      expect((err as ConnectorError).statusCode).toBe(status);
+    });
+
+    it('FCM send HTTP 502 → provider_unavailable (every 5xx)', async () => {
+      mockFetch
+        .mockResolvedValueOnce(oauthSuccessResponse())
+        .mockResolvedValueOnce(fcmErrorResponse(502, {}));
+      const err = await new FcmPushConnector(buildConfig()).send({ to: 't', title: 'T' }).catch((e: unknown) => e);
+      expect((err as ConnectorError).providerCode).toBe('provider_unavailable');
     });
 
     // -------------------------------------------------------------------------
@@ -583,6 +664,24 @@ describe('FcmPushConnector', () => {
       step: { digest: false, events: undefined, total_count: undefined },
     };
 
+    it('reuses a tokenCache hit like .send() (no OAuth round-trip)', async () => {
+      const hook = createTokenCacheMock({
+        'fcm:test-project:test@test-project.iam.gserviceaccount.com': {
+          token: 'cached-tk',
+          expiresAt: Date.now() + 60_000,
+        },
+      });
+      mockFetch.mockResolvedValueOnce(fcmSuccessResponse());
+
+      await new FcmPushConnector(buildConfig({ tokenCache: hook })).sendMessage({ ...defaultOptions });
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      expect(mockFetch.mock.calls[0]![0]).toBe(FCM_SEND_URL);
+      expect((mockFetch.mock.calls[0]![1] as RequestInit).headers).toEqual(
+        expect.objectContaining({ Authorization: 'Bearer cached-tk' }),
+      );
+    });
+
     it('mints a fresh OAuth token then POSTs the FCM message', async () => {
       mockFetch
         .mockResolvedValueOnce(oauthSuccessResponse('legacy-tk'))
@@ -720,8 +819,88 @@ describe('FcmPushConnector', () => {
         expect(err).toBeInstanceOf(ConnectorError);
         const e = err as ConnectorError;
         expect(e.message).toBe('All 2 FCM message(s) failed to send');
-        expect(e.statusCode).toBe(500);
+        // Both targets failed the same way (transport), so that code survives
+        // instead of a synthetic 500.
+        expect(e.providerCode).toBe('provider_unavailable');
+        expect(e.statusCode).toBeNull();
       }
+    });
+
+    it('all targets failing with different codes → unknown, per-target errors on cause.errors', async () => {
+      mockFetch
+        .mockResolvedValueOnce(oauthSuccessResponse())
+        .mockResolvedValueOnce(fcmErrorResponse(404, { error: { status: 'NOT_FOUND', message: 'unregistered' } }))
+        .mockResolvedValueOnce(fcmErrorResponse(429, { error: { status: 'RESOURCE_EXHAUSTED', message: 'quota' } }));
+      const err = (await new FcmPushConnector(buildConfig())
+        .sendMessage({ ...defaultOptions, target: ['t1', 't2'] })
+        .catch((e: unknown) => e)) as ConnectorError;
+      expect(err.providerCode).toBe('unknown');
+      expect(err.statusCode).toBeNull();
+      expect((err.cause as { errors: unknown[] }).errors).toHaveLength(2);
+    });
+
+    // FCM targets are mutually exclusive: a passthrough condition/fid is ONE
+    // send to that target, never a token send.
+    it('a passthrough condition is a single condition send with no token', async () => {
+      mockFetch
+        .mockResolvedValueOnce(oauthSuccessResponse())
+        .mockResolvedValueOnce(fcmSuccessResponse());
+      await new FcmPushConnector(buildConfig()).sendMessage(
+        { ...defaultOptions, target: ['t1', 't2'] },
+        { _passthrough: { body: { condition: "'a' in topics" } } },
+      );
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      const msg = (JSON.parse((mockFetch.mock.calls[1]![1] as RequestInit).body as string) as {
+        message: Record<string, unknown>;
+      }).message;
+      expect(msg.condition).toBe("'a' in topics");
+      expect(msg).not.toHaveProperty('token');
+    });
+
+    // FCM v1: fcm_options / webpush are message fields; icon, color, tag, sound
+    // live in android.notification; sound/badge in apns.payload.aps.
+    it('type "data": icon/color/tag/sound/badge are NOT mapped, so the message stays silent', async () => {
+      mockFetch
+        .mockResolvedValueOnce(oauthSuccessResponse())
+        .mockResolvedValueOnce(fcmSuccessResponse());
+      await new FcmPushConnector(buildConfig()).sendMessage({
+        ...defaultOptions,
+        target: ['t1'],
+        overrides: { type: 'data', icon: 'ic_n', color: '#ff0000', tag: 'grp', sound: 'ding', badge: 2 },
+      });
+      const msg = (JSON.parse((mockFetch.mock.calls[1]![1] as RequestInit).body as string) as {
+        message: Record<string, unknown>;
+      }).message;
+      expect(msg).not.toHaveProperty('notification');
+      expect(msg).not.toHaveProperty('android');
+      expect(msg).not.toHaveProperty('apns');
+      expect(msg.data).toBeDefined();
+    });
+
+    it('maps fcmOptions, webPush, icon/color/tag/sound/badge overrides to their FCM v1 fields', async () => {
+      mockFetch
+        .mockResolvedValueOnce(oauthSuccessResponse())
+        .mockResolvedValueOnce(fcmSuccessResponse());
+      await new FcmPushConnector(buildConfig()).sendMessage({
+        ...defaultOptions,
+        target: ['t1'],
+        overrides: {
+          fcmOptions: { analytics_label: 'L' },
+          webPush: { headers: { Urgency: 'high' } },
+          icon: 'ic_n',
+          color: '#ff0000',
+          tag: 'grp',
+          sound: 'ding',
+          badge: 2,
+        },
+      });
+      const msg = (JSON.parse((mockFetch.mock.calls[1]![1] as RequestInit).body as string) as {
+        message: Record<string, unknown>;
+      }).message;
+      expect(msg.fcm_options).toEqual({ analytics_label: 'L' });
+      expect(msg.webpush).toEqual({ headers: { Urgency: 'high' } });
+      expect(msg.android).toEqual({ notification: { icon: 'ic_n', color: '#ff0000', tag: 'grp', sound: 'ding' } });
+      expect(msg.apns).toEqual({ payload: { aps: { sound: 'ding', badge: 2 } } });
     });
   });
 });

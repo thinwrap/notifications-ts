@@ -45,7 +45,7 @@ features (delivery callbacks, message class) via `_passthrough.body`.
 | 200 with other `status != '0'` | `invalid_request` |
 | 429 / `status: '1'` (throttled) | `rate_limited` |
 | 5xx | (any) | `provider_unavailable` |
-| network failure | — | `unknown` |
+| network failure | — | `provider_unavailable` |
 
 ## `_passthrough` examples
 

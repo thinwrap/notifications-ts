@@ -22,15 +22,49 @@ import type {
 const TELNYX_ENDPOINT = 'https://api.telnyx.com/v2/messages';
 
 /**
- * Telnyx error `code` strings (from `errors[0].code`) that should map to
- * `invalid_recipient` rather than the generic `invalid_request`. Telnyx's
- * typed-error surface lets us disambiguate.
+ * Classify a Telnyx synchronous error by `errors[0].code`, a numeric string
+ * (https://developers.telnyx.com/development/api-fundamentals/api-errors).
+ * Only the 403xx "API request" messaging codes and the 10xxx/20xxx platform
+ * codes can appear in a send response; the 400xx delivery codes arrive only in
+ * the async `message.finalized` webhook, so they are deliberately absent.
+ * Titles: https://support.telnyx.com/en/articles/6505121-telnyx-messaging-error-codes
  */
-const TELNYX_INVALID_RECIPIENT_CODES: ReadonlySet<string> = new Set([
-  'to_number_invalid',
-  'messaging_profile_id_not_found',
-  'no_to_number_provided',
-]);
+function mapTelnyxCode(
+  code: string,
+  source: { pointer?: string } | undefined,
+): ProviderCode | null {
+  switch (code) {
+    case '40300': // Blocked due to STOP message (recipient opted out)
+    case '40309': // Invalid destination region
+    case '40310': // Invalid 'to' address
+      return 'invalid_recipient';
+    case '10009': // Authentication failed
+    case '10010': // Authorization failed
+    case '20001': // Invalid API Key secret
+    case '20006': // Expired access token
+    case '40311': // Invalid messaging profile secret
+    case '40313': // Missing messaging profile secret
+      return 'auth_failed';
+    case '10011': // Too many requests
+    case '40318': // Message queue full
+      return 'rate_limited';
+    case '10002': // Invalid phone number: a recipient problem only when it points at `to`
+      return source?.pointer === '/to' ? 'invalid_recipient' : 'invalid_request';
+    case '10004': // Missing required parameter
+    case '10015': // Bad Request
+    case '20100': // Insufficient Funds
+    case '40314': // Messaging disabled on account
+    case '40316': // No content provided for message
+    case '40317':
+    case '40328':
+    case '40331':
+    case '40333':
+      return 'invalid_request';
+  }
+  const n = Number(code);
+  if ((n >= 40301 && n <= 40308) || (n >= 40319 && n <= 40325)) return 'invalid_request';
+  return null;
+}
 
 export class TelnyxSmsConnector
   extends BaseConnector
@@ -103,6 +137,7 @@ export class TelnyxSmsConnector
         body: JSON.stringify(mergedBody),
       });
     } catch (error) {
+      if (error instanceof ConnectorError) throw error;
       if ((error as Error)?.name === 'AbortError') {
         throw new ConnectorError({
           message: (error as Error).message ?? 'Request cancelled',
@@ -156,17 +191,19 @@ export class TelnyxSmsConnector
     const errorCode = firstError?.code;
     const errorDetail = firstError?.detail ?? firstError?.title;
 
-    let providerCode: ProviderCode;
-    if (statusCode === 401 || statusCode === 403) providerCode = 'auth_failed';
-    else if (statusCode === 429) providerCode = 'rate_limited';
-    else if (statusCode >= 500) providerCode = 'provider_unavailable';
-    else if (
-      statusCode === 422 ||
-      (errorCode !== undefined && TELNYX_INVALID_RECIPIENT_CODES.has(errorCode))
-    )
-      providerCode = 'invalid_recipient';
-    else if (statusCode >= 400) providerCode = 'invalid_request';
-    else providerCode = 'unknown';
+    // A bare 422 is NOT a recipient signal: Telnyx returns it for any
+    // unprocessable parameter, so only the vendor code can say "recipient".
+    let providerCode: ProviderCode | null =
+      errorCode !== undefined && errorCode !== null
+        ? mapTelnyxCode(String(errorCode), firstError?.source)
+        : null;
+    if (providerCode === null) {
+      if (statusCode === 401 || statusCode === 403) providerCode = 'auth_failed';
+      else if (statusCode === 429) providerCode = 'rate_limited';
+      else if (statusCode >= 500) providerCode = 'provider_unavailable';
+      else if (statusCode >= 400) providerCode = 'invalid_request';
+      else providerCode = 'unknown';
+    }
 
     const baseMessage = errorDetail ?? `Telnyx HTTP ${statusCode}`;
 
@@ -215,6 +252,7 @@ export class TelnyxSmsConnector
         body: JSON.stringify(body),
       });
     } catch (error) {
+      if (error instanceof ConnectorError) throw error;
       if ((error as Error)?.name === 'AbortError') {
         throw new ConnectorError({
           message: (error as Error).message ?? 'Request cancelled',

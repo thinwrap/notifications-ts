@@ -9,22 +9,38 @@ See the [package README](../../../README.md). Dispatches when
 
 ```typescript
 const tm = new Chat('ms-teams', {
-  webhookUrl: 'https://outlook.office.com/webhook/...',
+  webhookUrl: 'https://prod-00.westus.logic.azure.com:443/workflows/.../triggers/manual/paths/invoke?...',
 });
 ```
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
-| `webhookUrl` | `string` | yes | Teams channel Incoming Webhook — the URL itself is the credential |
+| `webhookUrl` | `string` | yes | Teams Workflows webhook URL (or a legacy connector Incoming Webhook URL) — the URL itself is the credential |
 
 ## Auth setup
 
-Create an Incoming Webhook in Teams → channel → Connectors → Incoming
-Webhook. The URL is the credential.
+Create a Workflows webhook: a workflow (Teams → Workflows, or Power
+Automate) whose trigger is "When a Teams webhook request is received" and
+which posts the received Adaptive Card to the channel. Copy the URL the
+trigger generates — the URL is the credential.
+
+Legacy Office 365 connector Incoming Webhooks (`*.webhook.office.com`,
+`outlook.office.com`) are still accepted; Microsoft is retiring them in favor
+of Workflows.
 
 ## Endpoint
 
 The webhook URL is the endpoint. Each webhook is pinned to a channel.
+
+Success detection depends on the webhook generation:
+
+- `202 Accepted` is success whatever the body — a Workflows trigger answers
+  202 with no body when the flow has no Response action.
+- A 2xx body containing `HTTP error NNN` is a failure mapped from `NNN`
+  (legacy connectors report throttling this way on HTTP 200).
+- On a legacy connector host any 2xx body other than `1` is a failure
+  (`502` → `provider_unavailable`); on a Workflows URL any other 2xx is
+  success.
 
 ## Narrowed input augmentations
 
@@ -39,7 +55,7 @@ MessageCard payloads via `_passthrough.body`.
 | 400 malformed card | `invalid_request` |
 | 429 | (any) | `rate_limited` |
 | 5xx | (any) | `provider_unavailable` |
-| network failure | — | `unknown` |
+| network failure | — | `provider_unavailable` |
 
 ## `_passthrough` examples
 

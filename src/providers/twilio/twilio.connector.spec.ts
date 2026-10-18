@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
-import { TwilioSmsConnector, TWILIO_BASE_HOSTS } from './twilio.connector';
+import { TwilioSmsConnector, twilioApiHost } from './twilio.connector';
 import type { TwilioConfig } from './twilio.config';
-import type { TwilioRegion } from './twilio.types';
 import { ChannelTypeEnum } from '../../types';
 import { ConnectorError } from '../../utils';
 import { createRetryAfterFixture } from '../../test-utils';
@@ -94,7 +93,10 @@ describe('TwilioSmsConnector', () => {
       });
     });
 
-    it('region: "ie1" routes to api.ie1.twilio.com', async () => {
+    // Twilio understanding-edge-locations: non-US hosts are
+    // "PRODUCT.EDGE_LOCATION.PROCESSING_REGION.twilio.com" and "The edge location
+    // name (dublin, sydney) is a required part of the hostname for non-US regions".
+    it('region: "ie1" routes to api.dublin.ie1.twilio.com (legacy api.ie1 host is dead)', async () => {
       mockFetch.mockResolvedValueOnce(successResponse());
       const ieConnector = new TwilioSmsConnector({ ...defaultConfig, region: 'ie1' });
 
@@ -102,11 +104,11 @@ describe('TwilioSmsConnector', () => {
 
       const [url] = mockFetch.mock.calls[0]!;
       expect(url).toBe(
-        'https://api.ie1.twilio.com/2010-04-01/Accounts/ACtest123/Messages.json',
+        'https://api.dublin.ie1.twilio.com/2010-04-01/Accounts/ACtest123/Messages.json',
       );
     });
 
-    it('region: "au1" routes to api.au1.twilio.com', async () => {
+    it('region: "au1" routes to api.sydney.au1.twilio.com', async () => {
       mockFetch.mockResolvedValueOnce(successResponse());
       const auConnector = new TwilioSmsConnector({ ...defaultConfig, region: 'au1' });
 
@@ -114,16 +116,56 @@ describe('TwilioSmsConnector', () => {
 
       const [url] = mockFetch.mock.calls[0]!;
       expect(url).toBe(
-        'https://api.au1.twilio.com/2010-04-01/Accounts/ACtest123/Messages.json',
+        'https://api.sydney.au1.twilio.com/2010-04-01/Accounts/ACtest123/Messages.json',
       );
     });
 
-    it.each(
-      (Object.entries(TWILIO_BASE_HOSTS) as Array<[TwilioRegion, string]>).map(
-        ([region, host]) => ({ region, host }),
-      ),
-    )('TWILIO_BASE_HOSTS[$region] = $host', ({ region, host }) => {
-      expect(TWILIO_BASE_HOSTS[region]).toBe(host);
+    it('edge overrides the region default edge: ie1 + frankfurt → api.frankfurt.ie1.twilio.com', async () => {
+      mockFetch.mockResolvedValueOnce(successResponse());
+      const c = new TwilioSmsConnector({ ...defaultConfig, region: 'ie1', edge: 'frankfurt' });
+
+      await c.send({ to: '+14155550100', body: 'Hi' });
+
+      expect(mockFetch.mock.calls[0]![0]).toBe(
+        'https://api.frankfurt.ie1.twilio.com/2010-04-01/Accounts/ACtest123/Messages.json',
+      );
+    });
+
+    it('edge without region pins the us1 edge: api.{edge}.us1.twilio.com', () => {
+      expect(twilioApiHost(undefined, 'ashburn')).toBe('api.ashburn.us1.twilio.com');
+      expect(twilioApiHost('us1', 'tokyo')).toBe('api.tokyo.us1.twilio.com');
+      expect(twilioApiHost('us1', undefined)).toBe('api.twilio.com');
+    });
+
+    // Twilio legacy-regions: br1/de1/jp1/sg1/us2 "process in US1 — use
+    // api.twilio.com"; their api.<region>.twilio.com hosts stopped resolving.
+    it.each(['us2', 'br1', 'de1', 'jp1', 'sg1', 'xx', 'undefined'])(
+      'region %s → ConnectorError(invalid_request) before any credentialed request',
+      async (region) => {
+        const c = new TwilioSmsConnector({
+          ...defaultConfig,
+          region: region as unknown as TwilioConfig['region'],
+        });
+        const err = await c.send({ to: '+14155550100', body: 'Hi' }).catch((e: unknown) => e);
+        expect(err).toBeInstanceOf(ConnectorError);
+        expect((err as ConnectorError).providerCode).toBe('invalid_request');
+        expect(mockFetch).not.toHaveBeenCalled();
+
+        const err2 = await c.sendMessage({ to: '+14155550100', content: 'Hi' }).catch((e: unknown) => e);
+        expect((err2 as ConnectorError).providerCode).toBe('invalid_request');
+        expect(mockFetch).not.toHaveBeenCalled();
+      },
+    );
+
+    it('edge outside Twilio\'s public edge list → invalid_request (it is interpolated into the host)', async () => {
+      const c = new TwilioSmsConnector({
+        ...defaultConfig,
+        region: 'ie1',
+        edge: 'evil.example.com/x' as unknown as TwilioConfig['edge'],
+      });
+      const err = await c.send({ to: '+14155550100', body: 'Hi' }).catch((e: unknown) => e);
+      expect((err as ConnectorError).providerCode).toBe('invalid_request');
+      expect(mockFetch).not.toHaveBeenCalled();
     });
 
     it('maps 400 with body.code 21211 → invalid_recipient', async () => {
@@ -355,6 +397,15 @@ describe('TwilioSmsConnector', () => {
     it('should have id "twilio" and channelType SMS', () => {
       expect(connector.id).toBe('twilio');
       expect(connector.channelType).toBe(ChannelTypeEnum.SMS);
+    });
+
+    it('routes to the same region/edge host as .send()', async () => {
+      mockFetch.mockResolvedValueOnce(successResponse());
+      const c = new TwilioSmsConnector({ ...defaultConfig, region: 'ie1' });
+      await c.sendMessage({ to: '+14155550100', content: 'Hi' });
+      expect(mockFetch.mock.calls[0]![0]).toBe(
+        'https://api.dublin.ie1.twilio.com/2010-04-01/Accounts/ACtest123/Messages.json',
+      );
     });
 
     it('should send form-encoded message with Basic auth to correct URL', async () => {

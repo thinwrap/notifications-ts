@@ -184,6 +184,61 @@ describe('PusherBeamsPushConnector', () => {
       });
     });
 
+    // Beams publish formats, APNs example: `apns: { ..., data: { some: "metadata", ... } }`.
+    it('copies input.data to apns.data so iOS receives it', async () => {
+      mockFetch.mockResolvedValueOnce(successResponse());
+      await connector.send({ to: 'user-1', title: 'T', data: { itemId: 42 } });
+      const body = JSON.parse((mockFetch.mock.calls[0]![1] as RequestInit).body as string) as {
+        apns: Record<string, unknown>;
+      };
+      expect(body.apns.data).toEqual({ itemId: 42 });
+    });
+
+    // Apple, pushing-background-updates-to-your-app: the aps dictionary
+    // "includes only the content-available key"; FCM delivers a data message
+    // when `notification` is absent; Beams' web `notification` is Optional.
+    it('data-only send (no title/body): no notification/alert, aps.content-available = 1', async () => {
+      mockFetch.mockResolvedValueOnce(successResponse());
+      await connector.send({ to: 'user-1', data: { sync: 'now' } });
+      const body = JSON.parse((mockFetch.mock.calls[0]![1] as RequestInit).body as string) as Record<
+        string,
+        Record<string, unknown>
+      >;
+      expect(body.fcm).not.toHaveProperty('notification');
+      expect(body.fcm!.data).toEqual({ sync: 'now' });
+      expect(body.apns!.aps).toEqual({ 'content-available': 1 });
+      expect(body.apns!.data).toEqual({ sync: 'now' });
+      expect(body.web).not.toHaveProperty('notification');
+      expect(body.web!.data).toEqual({ sync: 'now' });
+    });
+
+    it.each(['evil.example.com/x', 'a b', '', '-lead', 'x'.repeat(64)])(
+      'instanceId %j that is not one DNS label → invalid_request, secret never sent',
+      async (instanceId) => {
+        const c = new PusherBeamsPushConnector({ ...defaultConfig, instanceId });
+        const err = await c.send({ to: 'u', title: 't' }).catch((e: unknown) => e);
+        expect((err as ConnectorError).providerCode).toBe('invalid_request');
+        const err2 = await c
+          .sendMessage({
+            target: ['u'],
+            title: 't',
+            content: 'c',
+            payload: {},
+            subscriber: {},
+            step: { digest: false, events: undefined, total_count: undefined },
+          })
+          .catch((e: unknown) => e);
+        expect((err2 as ConnectorError).providerCode).toBe('invalid_request');
+        expect(mockFetch).not.toHaveBeenCalled();
+      },
+    );
+
+    it('maps HTTP 502 to provider_unavailable (every 5xx)', async () => {
+      mockFetch.mockResolvedValueOnce(errorResponse(502, { error: 'Bad Gateway' }));
+      const err = await connector.send({ to: 'u', title: 't' }).catch((e: unknown) => e);
+      expect((err as ConnectorError).providerCode).toBe('provider_unavailable');
+    });
+
     it('routes interests broadcasts to /publishes/interests', async () => {
       mockFetch.mockResolvedValueOnce(successResponse('pub-2'));
 
@@ -286,18 +341,22 @@ describe('PusherBeamsPushConnector', () => {
       }
     });
 
-    it('maps HTTP 422 to invalid_recipient', async () => {
-      mockFetch.mockResolvedValueOnce(errorResponse(422, { error: 'No subscribers' }));
-
-      try {
-        await connector.send({ to: 'u1', title: 'h', body: 'b' });
-        expect.unreachable('Should have thrown');
-      } catch (err) {
-        expect(err).toBeInstanceOf(ConnectorError);
-        const ce = err as ConnectorError;
-        expect(ce.providerCode).toBe('invalid_recipient');
-        expect(ce.statusCode).toBe(422);
-      }
+    // publish-api: "422 Unprocessable Entity — JSON does not our match schema",
+    // "401 Incorrect API Key", "402 Payment Required", "404 Could not find the instance".
+    it.each([
+      [422, 'invalid_request'],
+      [400, 'invalid_request'],
+      [404, 'invalid_request'],
+      [413, 'invalid_request'],
+      [401, 'auth_failed'],
+      [402, 'rate_limited'],
+      [403, 'auth_failed'],
+    ] as const)('maps HTTP %i to %s', async (status, expected) => {
+      mockFetch.mockResolvedValueOnce(errorResponse(status, { error: 'e' }));
+      const err = await connector.send({ to: 'u1', title: 'h', body: 'b' }).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(ConnectorError);
+      expect((err as ConnectorError).providerCode).toBe(expected);
+      expect((err as ConnectorError).statusCode).toBe(status);
     });
 
     it('maps HTTP 429 with Retry-After to rate_limited with cause.retryAfter + cause.retryAfterSeconds', async () => {

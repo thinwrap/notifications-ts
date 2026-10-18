@@ -40,7 +40,7 @@ Standard chat input (`body` is `text`). Cards v2 payloads via
 | 400 invalid card | `invalid_request` |
 | 429 | (any) | `rate_limited` |
 | 5xx | (any) | `provider_unavailable` |
-| network failure | — | `unknown` |
+| network failure | — | `provider_unavailable` |
 
 ## `_passthrough` examples
 

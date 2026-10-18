@@ -195,6 +195,45 @@ describe('ResendEmailConnector', () => {
       ]);
     });
 
+    // send-email reference, attachments.content_id: "You can embed images using
+    // the content id parameter for the attachment".
+    it('sends attachment contentId as content_id (inline cid images)', async () => {
+      mockFetch.mockResolvedValueOnce(resendSuccessResponse());
+      await connector.send({
+        from: 'a@example.com',
+        to: 'r@example.com',
+        subject: 's',
+        html: '<img src="cid:logo">',
+        attachments: [{ filename: 'logo.png', contentType: 'image/png', content: Buffer.from('x'), contentId: 'logo' }],
+      });
+      const body = JSON.parse((mockFetch.mock.calls[0]![1] as RequestInit).body as string) as {
+        attachments: Array<Record<string, unknown>>;
+      };
+      expect(body.attachments[0]!.content_id).toBe('logo');
+    });
+
+    // Resend tags: "can only contain ASCII letters (a–z, A–Z), numbers (0–9),
+    // underscores (_), or dashes (-)", max 256.
+    it.each(['welcome email', 'a:b', 'x.y'])('tag %j → invalid_request before sending', async (tag) => {
+      const err = await connector
+        .send({ from: 'a@example.com', to: 'r@example.com', subject: 's', text: 't', tags: [tag] })
+        .catch((e: unknown) => e);
+      expect((err as ConnectorError).providerCode).toBe('invalid_request');
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it('from: a display name with specials is quoted (RFC 5322 phrase)', async () => {
+      mockFetch.mockResolvedValueOnce(resendSuccessResponse());
+      await new ResendEmailConnector({ ...defaultConfig, senderName: 'Acme, Inc.' }).send({
+        from: 'a@example.com',
+        to: 'r@example.com',
+        subject: 's',
+        text: 't',
+      });
+      const body = JSON.parse((mockFetch.mock.calls[0]![1] as RequestInit).body as string) as { from: string };
+      expect(body.from).toBe('"Acme, Inc." <a@example.com>');
+    });
+
     it('forwards Thinwrap headers field as Resend headers on the body', async () => {
       mockFetch.mockResolvedValueOnce(resendSuccessResponse());
 

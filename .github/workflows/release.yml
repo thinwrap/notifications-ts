@@ -5,11 +5,11 @@ name: Publish to npm
 # Publish job is inlined (not delegated to an external reusable workflow) so
 # the full publish path is auditable in this repo. Sigstore attests the
 # workflow source; OIDC trusted publishing means no NPM_TOKEN is consumed.
-# Two-factor authentication on the npm publishing account is a manual precondition
-# verified at tag time by docs/release-checklist-v1.0.md.
+# Two-factor authentication on the npm publishing account is a manual
+# precondition of tagging.
 #
-# Trigger: push of a `v*.*.*` tag to any branch (branch protection on `main`
-# ensures the tag's commit is on a protected branch).
+# Trigger: push of a `v*.*.*` tag. Branch protection does not cover tags, so
+# the job refuses to publish unless the tagged commit is on `main`.
 
 on:
   push:
@@ -29,19 +29,38 @@ jobs:
     name: publish @thinwrap/notifications
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0    # full history for the on-main ancestry check
+          # Nothing here pushes, and the repo is public, so the main-branch
+          # fetch below needs no token; don't leave one in .git/config for
+          # dependency lifecycle scripts to read.
+          persist-credentials: false
 
-      - uses: actions/setup-node@v6
+      # Tags bypass branch protection; without this, a tag on any commit
+      # (for example on an unmerged branch) would publish to npm.
+      - name: Verify the tagged commit is on main
+        run: |
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::Tagged commit $GITHUB_SHA is not on main; refusing to publish."
+            exit 1
+          fi
+          echo "Tagged commit $GITHUB_SHA is on main."
+
+      # No `cache: npm` here: the cache is shared with every run on main, so a
+      # poisoned entry would flow into the build that gets signed with provenance.
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version: '20'
           registry-url: 'https://registry.npmjs.org'
-          cache: npm
 
       # OIDC trusted publishing requires npm >= 11.5.1; Node 20 bundles npm 10.
-      # Pinned to 11.x because npm@latest is now 12.x, which requires Node >= 22.22
-      # and fails to run on this job's Node 20.
+      # Pinned to an exact 11.x (engines `^20.17.0 || >=22.9.0`) because
+      # npm@latest is 12.x, which needs Node >= 22.22, and a floating range
+      # would change the publishing tool under a signed build.
       - name: Upgrade npm for OIDC trusted publishing
-        run: npm install -g npm@11
+        run: npm install -g npm@11.21.0
 
       - name: Verify git tag matches package.json version
         run: |
@@ -74,3 +93,40 @@ jobs:
 
       - name: Verify provenance attestation
         run: npm audit signatures
+
+  # Separate job so only it holds `contents: write`; the publish job
+  # keeps read-only repository access. Runs only after npm accepted the version.
+  github-release:
+    name: GitHub Release
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write     # required to create the GitHub Release
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: CHANGELOG.md
+          sparse-checkout-cone-mode: false
+          # `gh` authenticates via GH_TOKEN; no git push, so no stored token.
+          persist-credentials: false
+
+      # The notes are the version's CHANGELOG section, so the release page and
+      # the CHANGELOG never disagree. Re-running the workflow is a no-op.
+      - name: Create GitHub Release from the CHANGELOG
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Release $tag already exists; skipping."
+            exit 0
+          fi
+          tr -d '\r' < CHANGELOG.md \
+            | awk -v h="## [${tag#v}]" 'index($0, h) == 1 {f = 1; next} f && /^## \[/ {exit} f' \
+            | sed -E '/^\[[^]]*\]: https?:\/\//d' > notes.md
+          if grep -q '[^[:space:]]' notes.md; then
+            gh release create "$tag" --title "$tag" --notes-file notes.md --verify-tag
+          else
+            echo "::warning::CHANGELOG.md has no section for ${tag#v}; using generated notes."
+            gh release create "$tag" --title "$tag" --generate-notes --verify-tag
+          fi

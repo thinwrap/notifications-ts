@@ -37,6 +37,15 @@ Standard email input applies. Resend templating is typically done via
 `react-email` rendered at the consumer side and sent as `html`; for
 `scheduled_at` and similar fields, use `_passthrough.body`.
 
+- `senderName` + `from` become one RFC 5322 mailbox string: a name with
+  specials is quoted (`"Acme, Inc." <a@b.c>`), a non-ASCII name is sent as
+  RFC 2047 encoded-words.
+- An attachment's `contentId` is sent as `content_id`, so
+  `<img src="cid:...">` in `html` resolves to it.
+- Each of `tags` is sent as `{ name: "tag", value }`. Resend allows only ASCII
+  letters, digits, `_` and `-` (max 256) in tag values, so any other tag is
+  rejected with `invalid_request` before sending.
+
 ## Error mapping
 
 | Vendor HTTP | Vendor signal | `providerCode` |
@@ -46,7 +55,7 @@ Standard email input applies. Resend templating is typically done via
 | 400 / 422 | (other) | `invalid_request` |
 | 429 | (any) | `rate_limited` |
 | 5xx | (any) | `provider_unavailable` |
-| network failure | — | `unknown` |
+| network failure | — | `provider_unavailable` |
 
 ## `_passthrough` examples
 

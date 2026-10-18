@@ -2,10 +2,10 @@ import type { SmsSendInput } from '../../types';
 
 /**
  * Sinch SMS API regional cluster. The base URL is `https://<region>.sms.api.sinch.com`;
- * only two regions are exposed today (`us` is the canonical default, `eu` provides
- * data residency). No map is necessary — the value is used as a subdomain prefix.
+ * the SMS API reference lists `us` (default), `eu`, `au`, `br` and `ca`
+ * (https://developers.sinch.com/docs/sms/api-reference/).
  */
-export type SinchRegion = 'us' | 'eu';
+export type SinchRegion = 'us' | 'eu' | 'au' | 'br' | 'ca';
 
 /**
  * Sinch-narrowed extension of `SmsSendInput`. All Sinch-specific fields are

@@ -9,9 +9,10 @@ import type { PushSendInput } from '../../types';
  *
  * **Recipient routing precedence :** when any of the
  * augmentation recipient fields is set (`include_external_user_ids`,
- * `include_player_ids`, `included_segments`, `excluded_segments`), the base
- * `input.to` is ignored and `include_subscription_ids` is omitted from the
- * wire body.
+ * `include_player_ids`, `included_segments`, `excluded_segments`), or any
+ * OneSignal targeting key is present in `_passthrough.body`, the base
+ * `input.to` is ignored and the default `include_subscription_ids` is omitted
+ * from the wire body.
  *
  * `data` is widened from the base `Record<string, string>` to
  * `Record<string, unknown>` — OneSignal accepts arbitrary JSON in `data`.

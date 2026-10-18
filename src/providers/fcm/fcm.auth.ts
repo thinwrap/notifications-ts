@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import { ConnectorError } from '../../utils';
+import type { ProviderCode } from '../../types';
 import type { GoogleTokenResponse } from './fcm.types';
 
 /**
@@ -30,11 +31,25 @@ export function createSignedJwt(clientEmail: string, privateKey: string): string
 
   const unsignedToken = `${encodedHeader}.${encodedClaims}`;
 
-  const sign = crypto.createSign('RSA-SHA256');
-  sign.update(unsignedToken);
-  sign.end();
-
-  const signature = sign.sign(privateKey, 'base64url');
+  let signature: string;
+  try {
+    const sign = crypto.createSign('RSA-SHA256');
+    sign.update(unsignedToken);
+    sign.end();
+    signature = sign.sign(privateKey, 'base64url');
+  } catch (err) {
+    // A malformed or wrong-type PEM makes node:crypto throw its own Error.
+    // It is a credential problem, so surface it as auth_failed like every
+    // other failure; only the class name is kept so no key material or
+    // OpenSSL detail about the key can reach a log.
+    throw new ConnectorError({
+      message: 'FCM service-account privateKey could not sign the OAuth assertion',
+      statusCode: null,
+      providerCode: 'auth_failed',
+      providerMessage: 'FCM service-account privateKey could not sign the OAuth assertion',
+      cause: { raw: { exception: (err as Error)?.name ?? 'Error' } },
+    });
+  }
 
   return `${unsignedToken}.${signature}`;
 }
@@ -57,20 +72,39 @@ export async function getAccessToken(
 ): Promise<{ accessToken: string; expiresInSeconds: number }> {
   const jwt = createSignedJwt(clientEmail, privateKey);
 
-  const response = await fetchImpl('https://oauth2.googleapis.com/token', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-    },
-    body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${jwt}`,
-  });
+  let response: Response;
+  try {
+    response = await fetchImpl('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${jwt}`,
+    });
+  } catch (error) {
+    if (error instanceof ConnectorError) throw error;
+    if ((error as Error)?.name === 'AbortError') {
+      throw new ConnectorError({
+        message: (error as Error).message ?? 'Request cancelled',
+        statusCode: null,
+        providerCode: 'invalid_request',
+        cause: error,
+      });
+    }
+    throw new ConnectorError({
+      message: (error as Error).message ?? 'Network error',
+      statusCode: null,
+      providerCode: 'provider_unavailable',
+      cause: { raw: error },
+    });
+  }
 
   if (!response.ok) {
     const errText = await response.text().catch(() => '');
     throw new ConnectorError({
       message: `FCM OAuth token exchange failed: ${response.status} ${errText}`,
       statusCode: response.status,
-      providerCode: 'auth_failed',
+      providerCode: mapOAuthStatus(response.status),
       providerMessage: errText || `FCM OAuth token exchange failed: ${response.status}`,
     });
   }
@@ -92,4 +126,16 @@ export async function getAccessToken(
     accessToken: data.access_token,
     expiresInSeconds: typeof data.expires_in === 'number' ? data.expires_in : 0,
   };
+}
+
+/**
+ * Google's token endpoint answers a bad assertion or client with 400/401
+ * (`invalid_grant`, `invalid_client`); only those are credential failures.
+ * A 429 or 5xx is the endpoint itself being busy or down, and retrying the
+ * same credentials can succeed.
+ */
+function mapOAuthStatus(status: number): ProviderCode {
+  if (status === 429) return 'rate_limited';
+  if (status >= 500) return 'provider_unavailable';
+  return 'auth_failed';
 }

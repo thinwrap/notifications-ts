@@ -10,7 +10,7 @@ import type {
 import { ChannelTypeEnum } from '../../types';
 import { ConnectorError } from '../../types';
 import type { ProviderCode } from '../../types';
-import { mergePassthrough } from '../../utils';
+import { encodePathSegment, mergePassthrough } from '../../utils';
 import { redactSecrets, scrubTransportError } from '../../utils';
 import type { TelegramConfig } from './telegram.config';
 import type { TelegramNarrowedInput, TelegramResponse } from './telegram.types';
@@ -71,7 +71,7 @@ export class TelegramChatConnector
       input._passthrough,
     );
 
-    const url = `https://api.telegram.org/bot${this.config.botToken}/sendMessage`;
+    const url = `https://api.telegram.org/bot${encodePathSegment(this.config.botToken, 'Telegram botToken')}/sendMessage`;
 
     let response: Response;
     try {
@@ -81,6 +81,7 @@ export class TelegramChatConnector
         body: JSON.stringify(mergedBody),
       });
     } catch (error) {
+      if (error instanceof ConnectorError) throw error;
       // The bot token is embedded in the request URL path; redact it from
       // surfaced error text and never store the raw fetch error.
       const err = error as Error;
@@ -142,11 +143,17 @@ export class TelegramChatConnector
     // Telegram emits retry_after in body, not Retry-After header outlier.
     const retryAfter = body?.parameters?.retry_after ?? null;
 
+    // Bot API server (tdlib/telegram-bot-api): every 403 is chat-scoped ("bot
+    // was blocked by the user", "user is deactivated", "bot was kicked from
+    // the group chat", "bot is not a member of the … chat"), never a
+    // credential error. A bad token is 401 "Unauthorized: invalid token
+    // specified", and a malformed `/bot<token>/` path is 404 "Not Found";
+    // `sendMessage` always exists, so a 404 here means the token is wrong.
     const providerCode: ProviderCode =
-      statusCode === 401
+      statusCode === 401 || statusCode === 404
         ? 'auth_failed'
         : statusCode === 403
-          ? 'auth_failed'
+          ? 'invalid_recipient'
           : statusCode === 429
             ? 'rate_limited'
             : statusCode === 400 && /chat not found/i.test(description ?? '')
@@ -207,7 +214,7 @@ export class TelegramChatConnector
     let response: Response;
     try {
       response = await this.fetchImpl(
-        `https://api.telegram.org/bot${this.config.botToken}/sendMessage`,
+        `https://api.telegram.org/bot${encodePathSegment(this.config.botToken, 'Telegram botToken')}/sendMessage`,
         {
           method: 'POST',
           headers: {
@@ -218,6 +225,7 @@ export class TelegramChatConnector
         }
       );
     } catch (error) {
+      if (error instanceof ConnectorError) throw error;
       // The bot token is embedded in the request URL path; redact it from
       // surfaced error text and never store the raw fetch error.
       const err = error as Error;

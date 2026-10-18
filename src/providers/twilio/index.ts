@@ -1,8 +1,9 @@
-export { TwilioSmsConnector, TWILIO_BASE_HOSTS } from './twilio.connector';
+export { TwilioSmsConnector, TWILIO_DEFAULT_EDGES, twilioApiHost } from './twilio.connector';
 export type { TwilioConfig } from './twilio.config';
 export type {
   TwilioNarrowedInput,
   TwilioRegion,
+  TwilioEdge,
   TwilioMessageResponse,
   TwilioErrorResponse,
   TwilioSmsSendInput,

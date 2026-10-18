@@ -11,7 +11,7 @@ import type {
 import { ChannelTypeEnum } from '../../types';
 import { ConnectorError } from '../../types';
 import type { ProviderCode } from '../../types';
-import { mergePassthrough } from '../../utils';
+import { encodePathSegment, mergePassthrough } from '../../utils';
 import { parseRetryAfter } from '../../utils';
 import { encodeBase64Ascii } from '../../utils';
 import type { TwilioConfig } from './twilio.config';
@@ -19,27 +19,79 @@ import type {
   TwilioNarrowedInput,
   TwilioMessageResponse,
   TwilioRegion,
+  TwilioEdge,
   TwilioErrorResponse,
 } from './twilio.types';
 
 /**
- * Regional-cluster host map. us1 is the canonical/default cluster and does
- * NOT have a regional subdomain (`api.twilio.com`, not `api.us1.twilio.com`);
- * every other region uses the `api.<region>.twilio.com` pattern. A static
- * `Record` is used instead of a template-string concatenation so the us1
- * default case is encoded explicitly. Adding a new region (e.g., `kr1`) is a
- * one-line addition to this map + one entry in the `TwilioRegion` union.
+ * Default edge per non-US processing region. Twilio: "The edge location name
+ * (dublin, sydney) is a required part of the hostname for non-US regions", and
+ * the legacy-regions table pairs ie1 with dublin and au1 with sydney. No Twilio
+ * SDK ships such a map (they require the caller to pass both), so this is the
+ * library's documented default.
  */
-export const TWILIO_BASE_HOSTS: Record<TwilioRegion, string> = {
-  us1: 'api.twilio.com',
-  us2: 'api.us2.twilio.com',
-  ie1: 'api.ie1.twilio.com',
-  au1: 'api.au1.twilio.com',
-  br1: 'api.br1.twilio.com',
-  de1: 'api.de1.twilio.com',
-  jp1: 'api.jp1.twilio.com',
-  sg1: 'api.sg1.twilio.com',
+export const TWILIO_DEFAULT_EDGES: Readonly<Record<Exclude<TwilioRegion, 'us1'>, TwilioEdge>> = {
+  ie1: 'dublin',
+  au1: 'sydney',
 };
+
+const TWILIO_REGIONS: ReadonlySet<string> = new Set<TwilioRegion>(['us1', 'ie1', 'au1']);
+
+const TWILIO_EDGES: ReadonlySet<string> = new Set<TwilioEdge>([
+  'sydney',
+  'sao-paulo',
+  'dublin',
+  'frankfurt',
+  'tokyo',
+  'singapore',
+  'ashburn',
+  'umatilla',
+  'roaming',
+]);
+
+// Legacy ids whose `api.<id>.twilio.com` host went dark on 2026-04-28; Twilio
+// says they "process in US1 — use api.twilio.com".
+const TWILIO_US1_ONLY_LEGACY_IDS: ReadonlySet<string> = new Set(['us2', 'br1', 'de1', 'jp1', 'sg1']);
+
+/**
+ * Resolve the Messages API host for a region/edge pair, following Twilio's
+ * documented `PRODUCT.EDGE.REGION.twilio.com` shape. Both values are
+ * interpolated into the hostname the Basic credentials are sent to, so each
+ * must come from the closed lists above; anything else is rejected before a
+ * request is built.
+ */
+export function twilioApiHost(region: string | undefined, edge: string | undefined): string {
+  const resolvedRegion = region ?? 'us1';
+  if (!TWILIO_REGIONS.has(resolvedRegion)) {
+    const hint = TWILIO_US1_ONLY_LEGACY_IDS.has(resolvedRegion)
+      ? ` Twilio processes "${resolvedRegion}" traffic in us1; omit \`region\` (or pass \`edge\` to choose an edge).`
+      : '';
+    throw invalidTwilioConfig(
+      `Unknown Twilio region "${resolvedRegion}". Supported: us1, ie1, au1.${hint}`,
+    );
+  }
+  if (edge !== undefined && !TWILIO_EDGES.has(edge)) {
+    throw invalidTwilioConfig(
+      `Unknown Twilio edge "${edge}". Supported: ${[...TWILIO_EDGES].join(', ')}.`,
+    );
+  }
+  if (resolvedRegion === 'us1') {
+    // `api.twilio.com` is Twilio's canonical us1 host; an explicit edge needs
+    // the fully-qualified form.
+    return edge === undefined ? 'api.twilio.com' : `api.${edge}.us1.twilio.com`;
+  }
+  const resolvedEdge = edge ?? TWILIO_DEFAULT_EDGES[resolvedRegion as Exclude<TwilioRegion, 'us1'>];
+  return `api.${resolvedEdge}.${resolvedRegion}.twilio.com`;
+}
+
+function invalidTwilioConfig(message: string): ConnectorError {
+  return new ConnectorError({
+    message,
+    statusCode: null,
+    providerCode: 'invalid_request',
+    providerMessage: message,
+  });
+}
 
 export class TwilioSmsConnector
   extends BaseConnector
@@ -56,8 +108,8 @@ export class TwilioSmsConnector
    * Thinwrap-native send. Implements `ISmsConnector`.
    * Builds an `application/x-www-form-urlencoded` body in PascalCase wire
    * shape, authenticates with HTTP Basic (`accountSid:authToken`), and POSTs
-   * to the regional Twilio Messages endpoint. the URL is constructed
-   * via `TWILIO_BASE_HOSTS[config.region ?? 'us1']`.
+   * to the Twilio Messages endpoint for `config.region` / `config.edge`
+   * (see {@link twilioApiHost}).
    *
    * the connector explicitly invokes
    * `transformKeys(_passthrough.body, CasingEnum.PASCAL_CASE)` so consumer-
@@ -69,6 +121,7 @@ export class TwilioSmsConnector
    * Twilio's documented multi-attachment shape — never comma-joined.
    */
   async send(input: TwilioNarrowedInput): Promise<SmsSendResult> {
+    const url = this.messagesUrl();
     const from = input.from ?? this.config.from;
     if (!from && !input.messagingServiceSid) {
       throw new ConnectorError({
@@ -144,9 +197,6 @@ export class TwilioSmsConnector
         normalizedPassthrough,
       );
 
-    const host = TWILIO_BASE_HOSTS[this.config.region ?? 'us1'];
-    const url = `https://${host}/2010-04-01/Accounts/${this.config.accountSid}/Messages.json`;
-
     const response = await this.sendPostForm(url, mergedBody, {
       headers: mergedHeaders,
     });
@@ -165,6 +215,11 @@ export class TwilioSmsConnector
       providerMessageId: raw.sid ?? null,
       raw,
     };
+  }
+
+  private messagesUrl(): string {
+    const host = twilioApiHost(this.config.region, this.config.edge);
+    return `https://${host}/2010-04-01/Accounts/${encodePathSegment(this.config.accountSid, 'Twilio accountSid')}/Messages.json`;
   }
 
   /**
@@ -208,6 +263,7 @@ export class TwilioSmsConnector
     options: ISmsOptions,
     bridgeProviderData: WithPassthrough<Record<string, unknown>> = {}
   ): Promise<ISendMessageSuccessResponse> {
+    const url = this.messagesUrl();
     const payload = {
       To: options.to,
       From: options.from ?? this.config.from,
@@ -225,7 +281,7 @@ export class TwilioSmsConnector
     );
 
     const response = await this.sendPostForm(
-      `https://api.twilio.com/2010-04-01/Accounts/${this.config.accountSid}/Messages.json`,
+      url,
       body,
       {
         headers: {

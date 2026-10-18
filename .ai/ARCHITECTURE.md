@@ -57,9 +57,11 @@ casing-on-extend was removed in the v1.0 hardening pass.
 
 ## Stateless wrapper + optional `TokenCacheHook`
 
-The wrapper holds no token state. FCM and APNs sign fresh on every `.send()` by default. Consumers wanting to
-amortize signing cost pass `tokenCache: TokenCacheHook` in config; the wrapper memoizes
-through the hook with deterministic keys — `'fcm:' + projectId` for FCM,
+The wrapper holds no token state. FCM and APNs sign fresh on every send by default. Consumers
+pass `tokenCache: TokenCacheHook` in config to reuse tokens (for APNs this is required in
+production, because APNs rejects provider tokens that change more than once per 20 minutes);
+the wrapper memoizes through the hook with deterministic keys —
+`'fcm:' + projectId + ':' + clientEmail` for FCM,
 `'apns:' + teamId + ':' + keyId + ':' + bundleId` for APNs. On vendor 401/403 the wrapper
 does **not** auto-evict; eviction is the consumer's responsibility. See
 [`../src/providers/fcm/README.md`](../src/providers/fcm/README.md) and

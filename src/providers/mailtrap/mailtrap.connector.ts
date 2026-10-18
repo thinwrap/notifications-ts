@@ -109,6 +109,7 @@ export class MailtrapEmailConnector
         body: serializedBody,
       });
     } catch (error) {
+      if (error instanceof ConnectorError) throw error;
       if ((error as Error)?.name === 'AbortError') {
         throw new ConnectorError({
           message: (error as Error).message ?? 'Request cancelled',
@@ -333,8 +334,11 @@ export class MailtrapEmailConnector
         filename: a.name ?? 'attachment',
         content: encodeBase64Bytes(a.file),
         type: a.mime,
+        // Same inline mapping as `.send()` (`content_id` + `disposition: inline`).
+        ...(a.cid ? { content_id: a.cid, disposition: 'inline' } : {}),
       }));
     }
+    if (options.headers && Object.keys(options.headers).length > 0) payload.headers = { ...options.headers };
 
     const { body, headers: passthroughHeaders } = mergePassthrough(
       payload,
@@ -354,6 +358,7 @@ export class MailtrapEmailConnector
         body: JSON.stringify(body),
       });
     } catch (error) {
+      if (error instanceof ConnectorError) throw error;
       if ((error as Error)?.name === 'AbortError') {
         throw new ConnectorError({
           message: (error as Error).message ?? 'Request cancelled',

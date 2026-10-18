@@ -32,6 +32,15 @@ connector synthesizes the Beams `apns.aps` (Apple) + `fcm.notification`
 Consumers pushing platform-specific extras override via `_passthrough.body.apns`,
 `_passthrough.body.fcm`, `_passthrough.body.web`.
 
+`data` goes to `fcm.data` (values stringified, as FCM requires), `apns.data`
+(the Beams APNs format's custom-data key) and `web.data`. With neither `title`
+nor `body` the send is data-only: no `fcm.notification`, no `web.notification`,
+and `apns.aps` is `{ "content-available": 1 }` so iOS wakes the app in the
+background instead of showing an empty alert.
+
+`instanceId` is used as the hostname label and a path segment, so it must be a
+single DNS label; anything else is rejected before the secret key is sent.
+
 Per the baseline-coverage rule, this translation lives in the
 connector and is invisible at the facade level.
 
@@ -47,14 +56,20 @@ fixed at the connector level; richer targeting via `_passthrough`.
 
 ## Error mapping
 
+Per Beams' [publish API](https://pusher.com/docs/beams/reference/publish-api/) error table:
+
 | Vendor HTTP | Vendor signal | `providerCode` |
 |---|---|---|
-| 401 / 403 | (any) | `auth_failed` |
-| 400 / 422 `Unknown user` | `invalid_recipient` |
-| 400 / 422 | (other) | `invalid_request` |
-| 429 | (any) | `rate_limited` |
+| 400 | invalid content type, missing param, body too large, not a JSON object | `invalid_request` |
+| 401 / 403 | "Incorrect API Key." | `auth_failed` |
+| 402 | publishing blocked for exceeding plan limits | `rate_limited` |
+| 404 | "Could not find the instance." | `invalid_request` |
+| 413 / 422 | body too large / "JSON does not … match schema" | `invalid_request` |
+| 429 | over 100 requests per second | `rate_limited` |
 | 5xx | (any) | `provider_unavailable` |
-| network failure | — | `unknown` |
+| other | (any) | `unknown` |
+| network failure | — | `provider_unavailable` |
+| (pre-flight) | `instanceId` is not a single DNS label | `invalid_request` |
 
 ## `_passthrough` examples
 

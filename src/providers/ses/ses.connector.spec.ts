@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { SesEmailConnector } from './ses.connector';
+import { Email } from '../../facades/email.facade';
 import type { SesConfig } from './ses.config';
 import { ChannelTypeEnum, CheckIntegrationResponseEnum } from '../../types';
 import { ConnectorError } from '../../utils';
@@ -141,207 +142,170 @@ describe('SesEmailConnector', () => {
       expect(body.ReplyToAddresses).toEqual(['reply@example.com']);
     });
 
-    it('builds a MIME multipart body for attachments and submits as Content.Raw.Data', async () => {
+    // SES v2 model `Message.Attachments` (botocore 1.37.27): Attachment requires
+    // RawContent + FileName; RawContent "needs to be base64-encoded if you are
+    // accessing Amazon SES directly through the HTTPS interface";
+    // ContentDisposition is ATTACHMENT | INLINE; ContentId is "used for
+    // referencing attachments with INLINE disposition in HTML content".
+    it('sends attachments through Content.Simple.Attachments (no raw MIME)', async () => {
       mockFetch.mockResolvedValueOnce(sesSuccessResponse());
-
-      const fileBuf = Buffer.from('PDF-CONTENT-BYTES');
-
-      await connector.send({
-        from: 'sender@example.com',
-        to: 'recipient@example.com',
-        subject: 'Attachment Test',
-        html: '<p>See attached</p>',
-        attachments: [
-          {
-            filename: 'report.pdf',
-            contentType: 'application/pdf',
-            content: fileBuf,
-          },
-        ],
-      });
-
-      const [, init] = mockFetch.mock.calls[0]!;
-      const body = JSON.parse((init as RequestInit).body as string) as {
-        Content: { Raw?: { Data: string }; Simple?: unknown };
-      };
-      expect(body.Content.Raw).toBeDefined();
-      expect(body.Content.Simple).toBeUndefined();
-
-      const decoded = Buffer.from(body.Content.Raw!.Data, 'base64').toString('utf-8');
-      expect(decoded).toContain('MIME-Version: 1.0');
-      expect(decoded).toContain('Content-Type: multipart/mixed');
-      expect(decoded).toContain('Content-Type: application/pdf; name="report.pdf"');
-      expect(decoded).toContain('Content-Disposition: attachment; filename="report.pdf"');
-      expect(decoded).toContain('Content-Transfer-Encoding: base64');
-      expect(decoded).toContain(fileBuf.toString('base64'));
-    });
-
-    it('RFC 2047-encodes only the non-ASCII sender display name, keeping a bare addr-spec in From', async () => {
-      mockFetch.mockResolvedValueOnce(sesSuccessResponse());
-
-      // Attachments force the Raw-MIME path where From is hand-built.
-      const conn = new SesEmailConnector({
-        ...defaultConfig,
-        senderName: 'Café ☕ Señor',
-      });
-
-      await conn.send({
-        from: 'sender@example.com',
-        to: 'recipient@example.com',
-        subject: 'Attachment Test',
-        html: '<p>hi</p>',
-        attachments: [
-          {
-            filename: 'report.pdf',
-            contentType: 'application/pdf',
-            content: Buffer.from('PDF'),
-          },
-        ],
-      });
-
-      const [, init] = mockFetch.mock.calls[0]!;
-      const body = JSON.parse((init as RequestInit).body as string) as {
-        Content: { Raw: { Data: string } };
-      };
-      const decoded = Buffer.from(body.Content.Raw.Data, 'base64').toString('utf-8');
-
-      const fromLine = decoded
-        .split('\r\n')
-        .find((l) => l.startsWith('From: '));
-      expect(fromLine).toBeDefined();
-      // addr-spec stays bare and parseable — NOT swallowed into an encoded-word.
-      expect(fromLine).toMatch(
-        /^From: =\?UTF-8\?B\?[A-Za-z0-9+/=]+\?= <sender@example\.com>$/,
-      );
-      expect(decoded).toContain('<sender@example.com>');
-    });
-
-    it('encodes string-typed attachment content as UTF-8 base64', async () => {
-      mockFetch.mockResolvedValueOnce(sesSuccessResponse());
+      const pdf = Buffer.from('%PDF-1.4 fake');
 
       await connector.send({
         from: 'sender@example.com',
         to: 'r@example.com',
-        subject: 'String attach',
-        text: 'plain',
+        subject: 'Report',
+        html: '<p>See attached <img src="cid:logo"></p>',
+        text: 'See attached',
         attachments: [
-          {
-            filename: 'note.txt',
-            contentType: 'text/plain',
-            content: 'hello',
-          },
+          { filename: 'report.pdf', contentType: 'application/pdf', content: pdf },
+          { filename: 'logo.png', contentType: 'image/png', content: Buffer.from([0x89, 0x50]), contentId: 'logo' },
         ],
       });
 
-      const [, init] = mockFetch.mock.calls[0]!;
-      const body = JSON.parse((init as RequestInit).body as string) as {
-        Content: { Raw: { Data: string } };
+      const body = JSON.parse((mockFetch.mock.calls[0]![1] as RequestInit).body as string) as {
+        Content: { Simple?: Record<string, unknown>; Raw?: unknown };
       };
-      const decoded = Buffer.from(body.Content.Raw.Data, 'base64').toString('utf-8');
-      expect(decoded).toContain(Buffer.from('hello', 'utf-8').toString('base64'));
+      expect(body.Content).not.toHaveProperty('Raw');
+      expect(body.Content.Simple).toMatchObject({
+        Subject: { Data: 'Report', Charset: 'UTF-8' },
+        Body: {
+          Html: { Data: '<p>See attached <img src="cid:logo"></p>', Charset: 'UTF-8' },
+          Text: { Data: 'See attached', Charset: 'UTF-8' },
+        },
+      });
+      expect(body.Content.Simple!.Attachments).toEqual([
+        {
+          FileName: 'report.pdf',
+          RawContent: pdf.toString('base64'),
+          ContentType: 'application/pdf',
+          ContentDisposition: 'ATTACHMENT',
+        },
+        {
+          FileName: 'logo.png',
+          RawContent: Buffer.from([0x89, 0x50]).toString('base64'),
+          ContentType: 'image/png',
+          ContentDisposition: 'INLINE',
+          ContentId: 'logo',
+        },
+      ]);
     });
 
-    it('preserves non-ASCII body content as UTF-8 in the Raw MIME (café ☕)', async () => {
+    it('encodes string attachment content as UTF-8 base64 RawContent', async () => {
       mockFetch.mockResolvedValueOnce(sesSuccessResponse());
-
-      // Attachments force the Raw-MIME path (the whole message is base64'd).
       await connector.send({
         from: 'sender@example.com',
         to: 'r@example.com',
-        subject: 'Ünïcödé ☕',
-        html: '<p>Prix: 5€ — café ☕</p>',
-        text: 'Prix: 5€ — café ☕',
-        attachments: [
-          { filename: 'a.txt', contentType: 'text/plain', content: 'x' },
-        ],
+        subject: 's',
+        text: 't',
+        attachments: [{ filename: 'note.txt', content: 'café ☕' }],
       });
-
-      const [, init] = mockFetch.mock.calls[0]!;
-      const body = JSON.parse((init as RequestInit).body as string) as {
-        Content: { Raw: { Data: string } };
+      const body = JSON.parse((mockFetch.mock.calls[0]![1] as RequestInit).body as string) as {
+        Content: { Simple: { Attachments: Array<Record<string, unknown>> } };
       };
-      const decoded = Buffer.from(body.Content.Raw.Data, 'base64').toString('utf-8');
-
-      // Body parts are base64 (7-bit-safe), never 8bit/7bit.
-      expect(decoded).toContain('Content-Type: text/plain; charset=UTF-8');
-      expect(decoded).toContain('Content-Transfer-Encoding: base64');
-      expect(decoded).not.toContain('Content-Transfer-Encoding: 8bit');
-      expect(decoded).not.toContain('Content-Transfer-Encoding: 7bit');
-      // The é/€/☕ must survive intact: decode each base64 body part and confirm.
-      const decodedParts = decoded
-        .split(/\r\n/)
-        .filter((l) => /^[A-Za-z0-9+/=]+$/.test(l) && l.length > 8)
-        .map((l) => Buffer.from(l, 'base64').toString('utf-8'))
-        .join('');
-      expect(decodedParts).toContain('Prix: 5€ — café ☕');
+      const att = body.Content.Simple.Attachments[0]!;
+      expect(Buffer.from(att.RawContent as string, 'base64').toString('utf8')).toBe('café ☕');
+      expect(att).not.toHaveProperty('ContentType');
     });
 
-    it('wraps attachment base64 at 76-char lines (RFC 2045/5322 conformance)', async () => {
-      mockFetch.mockResolvedValueOnce(sesSuccessResponse());
+    // SES developer guide (send-email-raw): a Unicode "friendly from" name must
+    // use MIME encoded-word syntax; RFC 5322 requires a quoted-string for an
+    // ASCII name with specials such as ",".
+    it('FromEmailAddress: quotes an ASCII name with specials, encoded-words a non-ASCII one', async () => {
+      mockFetch.mockImplementation(async () => sesSuccessResponse());
 
-      // >740 bytes: the base64 would exceed a single conformant line if unwrapped.
-      const big = Buffer.alloc(2000, 0x41);
+      await new SesEmailConnector({ ...defaultConfig, senderName: 'Acme, Inc.' }).send({
+        from: 'sender@example.com',
+        to: 'r@example.com',
+        subject: 's',
+        text: 't',
+      });
+      await new SesEmailConnector({ ...defaultConfig, senderName: 'Café Ünïcode' }).send({
+        from: 'sender@example.com',
+        to: 'r@example.com',
+        subject: 's',
+        text: 't',
+      });
+
+      const from1 = (JSON.parse((mockFetch.mock.calls[0]![1] as RequestInit).body as string) as {
+        FromEmailAddress: string;
+      }).FromEmailAddress;
+      const from2 = (JSON.parse((mockFetch.mock.calls[1]![1] as RequestInit).body as string) as {
+        FromEmailAddress: string;
+      }).FromEmailAddress;
+      expect(from1).toBe('"Acme, Inc." <sender@example.com>');
+      expect(from2).toMatch(/^=\?UTF-8\?B\?[A-Za-z0-9+/=]+\?= <sender@example\.com>$/);
+      const word = /^=\?UTF-8\?B\?([A-Za-z0-9+/=]+)\?=/.exec(from2)![1]!;
+      expect(Buffer.from(word, 'base64').toString('utf8')).toBe('Café Ünïcode');
+      mockFetch.mockReset();
+    });
+
+    // SES v2 MessageHeaderValue: "Can contain any printable ASCII character",
+    // max 995; name + value ≤ 996; at most 15 headers.
+    it('custom headers ride Content.Simple.Headers; non-ASCII values become encoded-words', async () => {
+      mockFetch.mockResolvedValueOnce(sesSuccessResponse());
       await connector.send({
         from: 'sender@example.com',
         to: 'r@example.com',
-        subject: 'big attach',
-        text: 'body',
-        attachments: [
-          {
-            filename: 'big.bin',
-            contentType: 'application/octet-stream',
-            content: big,
-          },
-        ],
+        subject: 's',
+        text: 't',
+        attachments: [{ filename: 'a.txt', content: 'a' }],
+        headers: { 'X-Campaign': 'spring', 'X-Label': 'Grüße' },
       });
-
-      const [, init] = mockFetch.mock.calls[0]!;
-      const body = JSON.parse((init as RequestInit).body as string) as {
-        Content: { Raw: { Data: string } };
+      const body = JSON.parse((mockFetch.mock.calls[0]![1] as RequestInit).body as string) as {
+        Content: { Simple: { Headers: Array<{ Name: string; Value: string }> } };
       };
-      const decoded = Buffer.from(body.Content.Raw.Data, 'base64').toString('utf-8');
-
-      const b64 = big.toString('base64');
-      // The unwrapped single-line payload must NOT appear — it was soft-wrapped.
-      expect(decoded).not.toContain(b64);
-      // The CRLF-wrapped 76-char form must appear verbatim.
-      const wrapped = (b64.match(/.{1,76}/g) ?? []).join('\r\n');
-      expect(decoded).toContain(wrapped);
-      // Every base64 body line is <= 76 chars.
-      const b64Lines = decoded
-        .split('\r\n')
-        .filter((l) => /^[A-Za-z0-9+/]+={0,2}$/.test(l) && l.length > 20);
-      expect(b64Lines.length).toBeGreaterThan(1);
-      for (const line of b64Lines) {
-        expect(line.length).toBeLessThanOrEqual(76);
-      }
+      const headers = body.Content.Simple.Headers;
+      expect(headers[0]).toEqual({ Name: 'X-Campaign', Value: 'spring' });
+      expect(headers[1]!.Name).toBe('X-Label');
+      expect(headers[1]!.Value).toMatch(/^=\?UTF-8\?B\?.+\?=$/);
+      expect(headers[1]!.Value).toMatch(/^[ -~]+$/);
     });
 
-    it('emits Content-ID/inline disposition when attachment.contentId is set', async () => {
-      mockFetch.mockResolvedValueOnce(sesSuccessResponse());
+    // header-fields.html: with Simple content these "are disallowed as custom
+    // headers: BCC, CC, Content-Disposition, Content-Type, Date, From,
+    // Message-ID, MIME-Version, Reply-To, Return-Path, Subject, To".
+    it.each(['Reply-To', 'to', 'CC', 'Bcc', 'From', 'Subject', 'Content-Type', 'MIME-Version', 'Date', 'Message-ID', 'Return-Path', 'Content-Disposition'])(
+      'a custom %s header → invalid_request before signing',
+      async (name) => {
+        const err = await connector
+          .send({ from: 'sender@example.com', to: 'r@example.com', subject: 's', text: 't', headers: { [name]: 'x' } })
+          .catch((e: unknown) => e);
+        expect(err).toBeInstanceOf(ConnectorError);
+        expect((err as ConnectorError).providerCode).toBe('invalid_request');
+        expect(mockFetch).not.toHaveBeenCalled();
+      },
+    );
 
-      await connector.send({
-        from: 'sender@example.com',
-        to: 'r@example.com',
-        subject: 'Inline image',
-        html: '<p><img src="cid:logo"></p>',
-        attachments: [
-          {
-            filename: 'logo.png',
-            contentType: 'image/png',
-            content: Buffer.from([0x89, 0x50, 0x4e, 0x47]),
-            contentId: 'logo',
-          },
-        ],
-      });
+    it.each([
+      ['more than 15 headers', Object.fromEntries(Array.from({ length: 16 }, (_, i) => [`X-H${i}`, 'v']))],
+      ['a header name with a colon', { 'X-Bad:Name': 'v' }],
+      ['a header name with a space', { 'X Bad': 'v' }],
+      ['a value with a control character', { 'X-Tab': 'a\tb' }],
+      ['an empty value', { 'X-Empty': '' }],
+      ['name + value over 996 characters', { 'X-Long': 'a'.repeat(995) }],
+    ])('%s → invalid_request before signing', async (_label, headers) => {
+      const err = await connector
+        .send({ from: 'sender@example.com', to: 'r@example.com', subject: 's', text: 't', headers })
+        .catch((e: unknown) => e);
+      expect((err as ConnectorError).providerCode).toBe('invalid_request');
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
 
-      const [, init] = mockFetch.mock.calls[0]!;
-      const body = JSON.parse((init as RequestInit).body as string) as {
-        Content: { Raw: { Data: string } };
-      };
-      const decoded = Buffer.from(body.Content.Raw.Data, 'base64').toString('utf-8');
-      expect(decoded).toContain('Content-ID: <logo>');
-      expect(decoded).toContain('Content-Disposition: inline; filename="logo.png"');
+    it('CR/LF in a custom header value → invalid_request naming only the header', async () => {
+      const err = (await connector
+        .send({
+          from: 'sender@example.com',
+          to: 'r@example.com',
+          subject: 's',
+          text: 't',
+          headers: { 'X-Inject': 'a\r\nBcc: evil@example.com' },
+        })
+        .catch((e: unknown) => e)) as ConnectorError;
+      expect(err.providerCode).toBe('invalid_request');
+      expect(err.message).toContain('X-Inject');
+      expect(err.message).not.toContain('evil@example.com');
+      expect(mockFetch).not.toHaveBeenCalled();
     });
 
     it('includes ConfigurationSetName from config when set', async () => {
@@ -383,7 +347,7 @@ describe('SesEmailConnector', () => {
       expect(body.ConfigurationSetName).toBe('override-set');
     });
 
-    it('propagates SES-narrowed input fields (sourceArn, returnPath, tags) to the wire body', async () => {
+    it('propagates SES-narrowed input fields (sourceArn, returnPath alias, tags) to the wire body', async () => {
       mockFetch.mockResolvedValueOnce(sesSuccessResponse());
 
       await connector.send({
@@ -404,11 +368,46 @@ describe('SesEmailConnector', () => {
       expect(body.FromEmailAddressIdentityArn).toBe(
         'arn:aws:ses:us-east-1:123456789012:identity/example.com',
       );
-      expect(body.ReturnPath).toBe('bounce@example.com');
+      // sesv2 SendEmailRequest has no ReturnPath; FeedbackForwardingEmailAddress
+      // is "The address that you want bounce and complaint notifications to be sent to".
+      expect(body).not.toHaveProperty('ReturnPath');
+      expect(body.FeedbackForwardingEmailAddress).toBe('bounce@example.com');
       expect(body.EmailTags).toEqual([
         { Name: 'campaign', Value: 'spring' },
         { Name: 'env', Value: 'prod' },
       ]);
+    });
+
+    it('feedbackForwardingEmailAddress wins over the deprecated returnPath alias', async () => {
+      mockFetch.mockResolvedValueOnce(sesSuccessResponse());
+      await connector.send({
+        from: 'sender@example.com',
+        to: 'r@example.com',
+        subject: 's',
+        text: 't',
+        feedbackForwardingEmailAddress: 'fb@example.com',
+        returnPath: 'old@example.com',
+      } as never);
+      const body = JSON.parse((mockFetch.mock.calls[0]![1] as RequestInit).body as string) as Record<string, unknown>;
+      expect(body.FeedbackForwardingEmailAddress).toBe('fb@example.com');
+    });
+
+    // SES v2 MessageTag Name/Value: "can only contain ASCII letters (a–z, A–Z),
+    // numbers (0–9), underscores (_), or dashes (-)", max 256.
+    it('a { Name } tag object with no Value → invalid_request before signing', async () => {
+      const err = await connector
+        .send({ from: 'sender@example.com', to: 'r@example.com', subject: 's', text: 't', tags: [{ Name: 'env' }] } as never)
+        .catch((e: unknown) => e);
+      expect((err as ConnectorError).providerCode).toBe('invalid_request');
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it.each([['welcome email'], ['a.b'], ['x'.repeat(257)]])('tag %j → invalid_request before signing', async (tag) => {
+      const err = await connector
+        .send({ from: 'sender@example.com', to: 'r@example.com', subject: 's', text: 't', tags: [tag] })
+        .catch((e: unknown) => e);
+      expect((err as ConnectorError).providerCode).toBe('invalid_request');
+      expect(mockFetch).not.toHaveBeenCalled();
     });
 
     it('signs and sends X-Amz-Security-Token when config has a sessionToken (STS)', async () => {
@@ -509,11 +508,12 @@ describe('SesEmailConnector', () => {
     // Error mapping table
     // -------------------------------------------------------------------------
 
-    it('maps 400 MessageRejected to invalid_recipient', async () => {
+    // API_SendEmail errors: MessageRejected (400) "The message content is invalid".
+    it('maps 400 MessageRejected to invalid_request (it is about content, not a recipient)', async () => {
       mockFetch.mockResolvedValueOnce(
         sesErrorResponse(400, {
           __type: 'MessageRejected',
-          message: 'Email address is on the suppression list',
+          message: 'Email address is not verified.',
         }),
       );
 
@@ -529,10 +529,67 @@ describe('SesEmailConnector', () => {
         expect(err).toBeInstanceOf(ConnectorError);
         const e = err as ConnectorError;
         expect(e.statusCode).toBe(400);
-        expect(e.providerCode).toBe('invalid_recipient');
-        expect(e.providerMessage).toBe('Email address is on the suppression list');
+        expect(e.providerCode).toBe('invalid_request');
+        expect(e.providerMessage).toBe('Email address is not verified.');
       }
     });
+
+    // restJson1: botocore RestJSONParser._inject_error_code and aws-sdk-js-v3
+    // loadRestJsonErrorCode read the x-amzn-ErrorType header first; its value
+    // looks like "MessageRejected:http://internal.amazon.com/coral/...".
+    it.each([
+      ['SendingPausedException:http://internal.amazon.com/coral/com.amazonaws.sesv2/', 'auth_failed'],
+      ['AccountSuspendedException:http://internal.amazon.com/', 'auth_failed'],
+      ['MessageRejected:http://internal.amazon.com/', 'invalid_request'],
+      ['MailFromDomainNotVerifiedException', 'invalid_request'],
+      ['TooManyRequestsException', 'rate_limited'],
+      ['LimitExceededException', 'invalid_request'],
+    ])('reads the code from the x-amzn-ErrorType header: %s → %s', async (header, expected) => {
+      mockFetch.mockResolvedValueOnce(
+        new Response(JSON.stringify({ message: 'm' }), {
+          status: 400,
+          headers: { 'x-amzn-ErrorType': header },
+        }),
+      );
+      const err = await connector
+        .send({ from: 'sender@example.com', to: 'r@example.com', subject: 's', text: 't' })
+        .catch((e: unknown) => e);
+      expect((err as ConnectorError).providerCode).toBe(expected);
+      expect((err as ConnectorError).providerMessage).toBe('m');
+    });
+
+    it('reads a lowercase body `code` and a namespaced `__type`', async () => {
+      mockFetch.mockResolvedValueOnce(
+        sesErrorResponse(400, { code: 'SendingPausedException', message: 'paused' }),
+      );
+      const e1 = (await connector
+        .send({ from: 'sender@example.com', to: 'r@example.com', subject: 's', text: 't' })
+        .catch((e: unknown) => e)) as ConnectorError;
+      expect(e1.providerCode).toBe('auth_failed');
+
+      mockFetch.mockResolvedValueOnce(
+        sesErrorResponse(400, { __type: 'com.amazonaws.sesv2#AccountSuspendedException', message: 'x' }),
+      );
+      const e2 = (await connector
+        .send({ from: 'sender@example.com', to: 'r@example.com', subject: 's', text: 't' })
+        .catch((e: unknown) => e)) as ConnectorError;
+      expect(e2.providerCode).toBe('auth_failed');
+    });
+
+    it.each(['x.evil.example/', 'us-east-1.evil.example', ''])(
+      'region %j → invalid_request before signing (it is part of the credentialed host)',
+      async (region) => {
+        const c = new SesEmailConnector({ ...defaultConfig, region });
+        const e1 = await c
+          .send({ from: 'sender@example.com', to: 'r@example.com', subject: 's', text: 't' })
+          .catch((e: unknown) => e);
+        const e2 = await c
+          .sendMessage({ to: ['r@example.com'], subject: 's', html: '<p>h</p>' })
+          .catch((e: unknown) => e);
+        for (const e of [e1, e2]) expect((e as ConnectorError).providerCode).toBe('invalid_request');
+        expect(mockFetch).not.toHaveBeenCalled();
+      },
+    );
 
     it('maps 403 SignatureDoesNotMatch to auth_failed', async () => {
       mockFetch.mockResolvedValueOnce(
@@ -906,7 +963,7 @@ describe('SesEmailConnector', () => {
       expect(body.ReplyToAddresses).toEqual(['reply@example.com']);
     });
 
-    it('uses Content.Raw.Data (base64 MIME) when attachments are provided', async () => {
+    it('sends attachments as Content.Simple.Attachments (cid → INLINE)', async () => {
       mockFetch.mockResolvedValueOnce(sesSuccessResponse());
 
       const fileBuffer = Buffer.from('file-content-here');
@@ -914,20 +971,30 @@ describe('SesEmailConnector', () => {
         to: ['recipient@example.com'],
         subject: 'Attachment Test',
         html: '<p>See attached</p>',
-        attachments: [{ mime: 'application/pdf', file: fileBuffer, name: 'report.pdf' }],
+        attachments: [
+          { mime: 'application/pdf', file: fileBuffer, name: 'report.pdf' },
+          { mime: 'image/png', file: Buffer.from('png'), name: 'logo.png', cid: 'logo' },
+        ],
       });
 
       const [, init] = mockFetch.mock.calls[0]!;
       const body = JSON.parse((init as RequestInit).body as string);
-      expect(body.Content).toHaveProperty('Raw');
-      expect(body.Content).not.toHaveProperty('Simple');
-      expect(typeof body.Content.Raw.Data).toBe('string');
-      const decoded = Buffer.from(body.Content.Raw.Data, 'base64').toString('utf-8');
-      expect(decoded).toContain('MIME-Version: 1.0');
-      expect(decoded).toContain('Content-Type: multipart/mixed');
-      expect(decoded).toContain('Content-Type: application/pdf; name="report.pdf"');
-      expect(decoded).toContain('Content-Transfer-Encoding: base64');
-      expect(decoded).toContain(fileBuffer.toString('base64'));
+      expect(body.Content).not.toHaveProperty('Raw');
+      expect(body.Content.Simple.Attachments).toEqual([
+        {
+          FileName: 'report.pdf',
+          RawContent: fileBuffer.toString('base64'),
+          ContentType: 'application/pdf',
+          ContentDisposition: 'ATTACHMENT',
+        },
+        {
+          FileName: 'logo.png',
+          RawContent: Buffer.from('png').toString('base64'),
+          ContentType: 'image/png',
+          ContentDisposition: 'INLINE',
+          ContentId: 'logo',
+        },
+      ]);
     });
 
     it('merges bridgeProviderData passthrough body into the request', async () => {
@@ -1038,5 +1105,24 @@ describe('SesEmailConnector', () => {
       const body = JSON.parse((init as RequestInit).body as string);
       expect(body.FromEmailAddress).toBe('Override Sender <sender@example.com>');
     });
+  });
+});
+
+describe('Email#checkIntegration() on SES', () => {
+  it('reports that SES needs options instead of a TypeError, and sends nothing', async () => {
+    const f = vi.fn();
+    mockFetch.mockReset();
+    const email = new Email('ses', {
+      region: 'us-east-1',
+      accessKeyId: 'AKID',
+      secretAccessKey: 'secret',
+      from: 'a@example.com',
+      fetch: f as unknown as typeof fetch,
+    });
+    const r = await email.checkIntegration();
+    expect(r.success).toBe(false);
+    expect(r.message).toContain('IEmailOptions');
+    expect(r.message).not.toContain('Cannot read properties');
+    expect(f).not.toHaveBeenCalled();
   });
 });

@@ -41,14 +41,20 @@ contact or for messages sent outside the 24h customer-service window — use
 
 ## Error mapping
 
+Meta's `error.code` is matched first; the HTTP status is the fallback.
+
 | Vendor HTTP | Vendor signal | `providerCode` |
 |---|---|---|
-| 401 / 403 | (any) | `auth_failed` |
-| 400 `code: 131026` (invalid number) | `invalid_recipient` |
+| (any) | `code` `0`, `3`, `10`, `190`, `200`–`299`, `368`, `131005`, `131031` | `auth_failed` |
+| (any) | `code` `4`, `80007`, `130429`, `131048`, `131056` | `rate_limited` |
+| (any) | `code` `131026` (undeliverable), `131021` (sender = recipient) | `invalid_recipient` |
+| (any) | `code` `100`, `131008`, `131009`, `131042`, `131045`, `131047` (outside the 24h window — send a template), `131051`, `132000`, `132001`, `132012`, `133010` (business number not registered) | `invalid_request` |
+| (any) | `code` `1`, `2`, `131000`, `131016`, `131057` | `provider_unavailable` |
+| 401 / 403 | (other) | `auth_failed` |
 | 400 | (other) | `invalid_request` |
-| 429 | (any) | `rate_limited` |
-| 5xx | (any) | `provider_unavailable` |
-| network failure | — | `unknown` |
+| 429 | (other) | `rate_limited` |
+| 5xx | (other) | `provider_unavailable` |
+| network failure | — | `provider_unavailable` |
 
 ## `_passthrough` examples
 

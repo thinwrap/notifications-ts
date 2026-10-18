@@ -22,6 +22,7 @@ export abstract class BaseConnector {
     //   2. Anything that does reject carries no credential, so the connectors'
     //      `(error as Error).message` cannot log one.
     this.fetchImpl = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      assertSafeHeaders(init?.headers);
       try {
         return await baseFetch(input, { ...init, redirect: 'error' });
       } catch (err) {
@@ -75,6 +76,7 @@ export abstract class BaseConnector {
     try {
       return await this.fetchImpl(url, init);
     } catch (err) {
+      if (err instanceof ConnectorError) throw err;
       if ((err as Error)?.name === 'AbortError') {
         throw new ConnectorError({
           message: (err as Error).message ?? 'Request cancelled',
@@ -88,6 +90,40 @@ export abstract class BaseConnector {
         statusCode: null,
         providerCode: 'provider_unavailable',
         cause: { raw: err },
+      });
+    }
+  }
+}
+
+/**
+ * Refuse a header whose name or value carries CR, LF or NUL before the request
+ * is built. undici would reject it with a TypeError that the transport seam
+ * turns into an opaque `provider_unavailable`, and a lenient custom `fetch`
+ * could put it on the wire (header injection). The message names the header,
+ * never its value — header values are where credentials live.
+ */
+function assertSafeHeaders(headers: RequestInit['headers'] | undefined): void {
+  if (headers === undefined || headers === null) return;
+  const entries: Array<[string, unknown]> =
+    typeof Headers === 'function' && headers instanceof Headers
+      ? [...headers.entries()]
+      : Array.isArray(headers)
+        ? (headers as Array<[string, unknown]>)
+        : Object.entries(headers as Record<string, unknown>);
+  for (const [name, value] of entries) {
+    const unsafe = /[\r\n\0]/;
+    const badValue =
+      value !== null && typeof value === 'object'
+        ? true
+        : value !== undefined && unsafe.test(String(value));
+    if (unsafe.test(String(name)) || badValue) {
+      const shownName = unsafe.test(String(name)) ? '(invalid name)' : String(name);
+      const message = `Header ${shownName} must be a single-line string (no CR, LF or NUL).`;
+      throw new ConnectorError({
+        message,
+        statusCode: null,
+        providerCode: 'invalid_request',
+        providerMessage: message,
       });
     }
   }

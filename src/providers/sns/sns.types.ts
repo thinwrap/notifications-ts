@@ -1,11 +1,13 @@
 import type { SmsSendInput } from '../../types';
 
 /**
- * SMS-eligible AWS regions for SNS. Sourced from
- * https://docs.aws.amazon.com/sns/latest/dg/sms_supported-countries.html;
- * SNS SMS publishing requires one of these regions.
+ * AWS regions for SNS SMS publishing. The literals are autocomplete hints from
+ * https://docs.aws.amazon.com/sns/latest/dg/sms_supported-countries.html; the
+ * type stays open because AWS keeps adding SMS regions. Any value must still be
+ * a valid AWS region name (checked before signing).
  */
 export type SnsRegion =
+  | (string & {})
   | 'us-east-1'
   | 'us-east-2'
   | 'us-west-1'

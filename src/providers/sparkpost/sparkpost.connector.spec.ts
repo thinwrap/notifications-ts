@@ -195,12 +195,65 @@ describe('SparkPostEmailConnector', () => {
         data: docBuf.toString('base64'),
       });
 
+      // Transmissions API, inline_images.name: "The name of the image, which
+      // will be inserted into the Content-ID header" — the cid, not the filename.
       expect(inlineImages).toHaveLength(1);
       expect(inlineImages[0]).toEqual({
-        name: 'logo.png',
+        name: 'logo',
         type: 'image/png',
         data: imgBuf.toString('base64'),
       });
+    });
+
+    // Transmissions API: attachments[].type and inline_images[].type are Required.
+    it('always sends `type`, defaulting to application/octet-stream', async () => {
+      mockFetch.mockResolvedValueOnce(successResponse());
+      await connector.send({
+        from: 'sender@example.com',
+        to: 'r@example.com',
+        subject: 'attach',
+        html: '<p>x</p>',
+        attachments: [
+          { filename: 'blob.bin', content: Buffer.from('x') },
+          { filename: 'img', content: Buffer.from('y'), contentId: 'img1' },
+        ],
+      });
+      const content = (JSON.parse((mockFetch.mock.calls[0]![1] as RequestInit).body as string) as {
+        content: { attachments: Array<Record<string, string>>; inline_images: Array<Record<string, string>> };
+      }).content;
+      expect(content.attachments[0]!.type).toBe('application/octet-stream');
+      expect(content.inline_images[0]).toEqual(
+        expect.objectContaining({ name: 'img1', type: 'application/octet-stream' }),
+      );
+    });
+
+    // "420 Exceed Sending Limit — You exceeded your daily, monthly, or sandbox sending limit."
+    it('maps 420 to rate_limited (a sending quota, not an auth failure)', async () => {
+      mockFetch.mockResolvedValueOnce(
+        new Response(JSON.stringify({ errors: [{ message: 'Exceed Sending Limit' }] }), { status: 420 }),
+      );
+      const err = await connector
+        .send({ from: 'sender@example.com', to: 'r@example.com', subject: 's', text: 't' })
+        .catch((e: unknown) => e);
+      expect((err as ConnectorError).providerCode).toBe('rate_limited');
+    });
+
+    it('sendMessage(): a cid attachment goes to inline_images named by the cid', async () => {
+      mockFetch.mockResolvedValueOnce(successResponse());
+      await connector.sendMessage({
+        to: ['r@example.com'],
+        subject: 's',
+        html: '<img src="cid:logo">',
+        attachments: [
+          { mime: 'image/png', file: Buffer.from('p'), name: 'logo.png', cid: 'logo' },
+          { mime: 'application/pdf', file: Buffer.from('d'), name: 'doc.pdf' },
+        ],
+      });
+      const content = (JSON.parse((mockFetch.mock.calls[0]![1] as RequestInit).body as string) as {
+        content: { attachments: Array<Record<string, string>>; inline_images: Array<Record<string, string>> };
+      }).content;
+      expect(content.inline_images).toEqual([{ name: 'logo', type: 'image/png', data: Buffer.from('p').toString('base64') }]);
+      expect(content.attachments).toEqual([{ name: 'doc.pdf', type: 'application/pdf', data: Buffer.from('d').toString('base64') }]);
     });
 
     // -------------------------------------------------------------------------

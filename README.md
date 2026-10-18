@@ -97,10 +97,12 @@ const fetchImpl = ((url, init) =>
 ```
 
 The wrapper holds no state — no token cache, no connection pool, no retry buffer.
-FCM and APNs sign tokens fresh on every `.send()` by default; supply an optional
-`tokenCache?: TokenCacheHook` in config to amortize signing cost. See the
-[FCM](src/providers/fcm/README.md) and [APNs](src/providers/apns/README.md) READMEs
-for hook-shape detail.
+FCM and APNs sign tokens fresh on every send by default; supply
+`tokenCache?: TokenCacheHook` in config to reuse them. For FCM it amortizes the
+OAuth exchange. For APNs it is **required in production**: APNs rejects a
+provider token that changes more than once every 20 minutes
+(`429 TooManyProviderTokenUpdates`). See the [FCM](src/providers/fcm/README.md)
+and [APNs](src/providers/apns/README.md) READMEs for hook-shape detail.
 
 ## Error handling
 
@@ -122,6 +124,13 @@ try {
   } else throw e;
 }
 ```
+
+**What is a `ConnectorError`.** Every vendor error response, every transport
+failure, and every request the connector rejects before sending — bad request
+data, and facade/config misuse such as a missing `config`, an unknown provider id,
+an unknown Twilio `region`/`edge`, or an FCM/APNs `privateKey` that cannot sign
+(`auth_failed`). Errors thrown by code you inject — a `tokenCache` hook, or a
+connector class constructed directly with `null` config — propagate unchanged.
 
 The wrapper performs no automatic retry. Compose your own retry strategy from
 `providerCode` and the raw vendor response carried on `e.cause` (including the

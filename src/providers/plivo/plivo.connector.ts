@@ -10,7 +10,7 @@ import type {
 import { ChannelTypeEnum } from '../../types';
 import { ConnectorError } from '../../types';
 import type { ProviderCode } from '../../types';
-import { mergePassthrough } from '../../utils';
+import { encodePathSegment, mergePassthrough } from '../../utils';
 import { parseRetryAfter } from '../../utils';
 import { encodeBase64Ascii } from '../../utils';
 import type { PlivoConfig } from './plivo.config';
@@ -89,7 +89,7 @@ export class PlivoSmsConnector
         input._passthrough,
       );
 
-    const url = `https://api.plivo.com/v1/Account/${this.config.authId}/Message/`;
+    const url = `https://api.plivo.com/v1/Account/${encodePathSegment(this.config.authId, 'Plivo authId')}/Message/`;
 
     let response: Response;
     try {
@@ -99,6 +99,7 @@ export class PlivoSmsConnector
         body: JSON.stringify(mergedBody),
       });
     } catch (error) {
+      if (error instanceof ConnectorError) throw error;
       if ((error as Error)?.name === 'AbortError') {
         throw new ConnectorError({
           message: (error as Error).message ?? 'Request cancelled',
@@ -206,7 +207,7 @@ export class PlivoSmsConnector
     let response: Response;
     try {
       response = await this.fetchImpl(
-        `https://api.plivo.com/v1/Account/${this.config.authId}/Message/`,
+        `https://api.plivo.com/v1/Account/${encodePathSegment(this.config.authId, 'Plivo authId')}/Message/`,
         {
           method: 'POST',
           headers: {
@@ -218,6 +219,7 @@ export class PlivoSmsConnector
         }
       );
     } catch (error) {
+      if (error instanceof ConnectorError) throw error;
       if ((error as Error)?.name === 'AbortError') {
         throw new ConnectorError({
           message: (error as Error).message ?? 'Request cancelled',

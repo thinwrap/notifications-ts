@@ -26,7 +26,7 @@ const scw = new Email('scaleway', {
 | `projectId` | `string` | yes | Written as `project_id` on every send |
 | `from` | `string` | yes | Default sender email |
 | `senderName` | `string` | no | Composed into `from.name` |
-| `region` | `'fr-par' \| 'nl-ams' \| 'pl-waw'` | no | Default `fr-par`; interpolated into the endpoint **path** |
+| `region` | `'fr-par' \| 'nl-ams' \| 'pl-waw'` | no | Default `fr-par`; interpolated into the endpoint **path**, so a value that is not region-shaped (`xx-yyy`) → `invalid_request`. Only `fr-par` currently serves Transactional Email; other regions are passed through, not rejected by name |
 
 ## Auth setup
 

@@ -10,17 +10,29 @@ import type {
 import { ChannelTypeEnum } from '../../types';
 import { ConnectorError } from '../../types';
 import type { ProviderCode } from '../../types';
-import { mergePassthrough } from '../../utils';
+import { encodePathSegment, mergePassthrough } from '../../utils';
 import { parseRetryAfter } from '../../utils';
 import type { SinchConfig } from './sinch.config';
-import type { SinchNarrowedInput, SinchSendResponse } from './sinch.types';
+import type { SinchNarrowedInput, SinchRegion, SinchSendResponse } from './sinch.types';
+
+const SINCH_REGIONS: ReadonlySet<string> = new Set<SinchRegion>(['us', 'eu', 'au', 'br', 'ca']);
 
 /**
- * Build the regional batches endpoint. Sinch exposes two clusters today (`us`
- * and `eu`); the region is a subdomain prefix, no host map is required.
+ * Build the regional batches endpoint. The region is a subdomain prefix of the
+ * host the API token is sent to, so only Sinch's documented clusters are
+ * accepted; anything else is rejected before a request is built.
  */
-function sinchBatchesUrl(region: 'us' | 'eu', servicePlanId: string): string {
-  return `https://${region}.sms.api.sinch.com/xms/v1/${servicePlanId}/batches`;
+function sinchBatchesUrl(region: string, servicePlanId: string): string {
+  if (!SINCH_REGIONS.has(region)) {
+    const message = `Unknown Sinch region "${region}". Supported: us, eu, au, br, ca.`;
+    throw new ConnectorError({
+      message,
+      statusCode: null,
+      providerCode: 'invalid_request',
+      providerMessage: message,
+    });
+  }
+  return `https://${region}.sms.api.sinch.com/xms/v1/${encodePathSegment(servicePlanId, 'Sinch servicePlanId')}/batches`;
 }
 
 export class SinchSmsConnector
@@ -102,6 +114,7 @@ export class SinchSmsConnector
         body: JSON.stringify(mergedBody),
       });
     } catch (error) {
+      if (error instanceof ConnectorError) throw error;
       if ((error as Error)?.name === 'AbortError') {
         throw new ConnectorError({
           message: (error as Error).message ?? 'Request cancelled',
@@ -222,6 +235,7 @@ export class SinchSmsConnector
         body: JSON.stringify(body),
       });
     } catch (error) {
+      if (error instanceof ConnectorError) throw error;
       if ((error as Error)?.name === 'AbortError') {
         throw new ConnectorError({
           message: (error as Error).message ?? 'Request cancelled',

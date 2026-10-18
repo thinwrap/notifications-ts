@@ -41,7 +41,7 @@ Block Kit and threading via `_passthrough.body`.
 | 401 / 403 / 404 (revoked webhook) | `auth_failed` |
 | 429 | (any) | `rate_limited` |
 | 5xx | (any) | `provider_unavailable` |
-| network failure | — | `unknown` |
+| network failure | — | `provider_unavailable` |
 
 ## `_passthrough` examples
 

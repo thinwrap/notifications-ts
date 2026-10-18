@@ -251,4 +251,25 @@ describe('RocketChatChatConnector', () => {
       expect(ce.statusCode).toBeNull();
     }
   });
+
+  // Novu IChatOptions carries webhookUrl/channel overrides; every other webhook
+  // connector honours them, so Rocket.Chat must too.
+  it('sendMessage(): posts to options.webhookUrl with channel + bridge passthrough', async () => {
+    mockFetch.mockResolvedValueOnce(successResponse());
+    await connector.sendMessage(
+      { webhookUrl: 'https://other.example.com/hooks/C/D', channel: '#ops', content: 'hi' },
+      { _passthrough: { body: { alias: 'bot' } } },
+    );
+    const [url, init] = mockFetch.mock.calls[0]!;
+    expect(url).toBe('https://other.example.com/hooks/C/D');
+    expect(JSON.parse((init as RequestInit).body as string)).toEqual({ text: 'hi', channel: '#ops', alias: 'bot' });
+  });
+
+  it('sendMessage(): an http:// options.webhookUrl is refused, not swapped for the config URL', async () => {
+    const err = await connector
+      .sendMessage({ webhookUrl: 'http://other.example.com/hooks/C/D', content: 'hi' })
+      .catch((e: unknown) => e);
+    expect((err as ConnectorError).providerCode).toBe('invalid_request');
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
 });

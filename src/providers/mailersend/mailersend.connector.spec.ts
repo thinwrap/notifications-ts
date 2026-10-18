@@ -127,7 +127,7 @@ describe('MailerSendEmailConnector', () => {
       expect(body.from).toEqual({ email: 'sender@example.com' });
     });
 
-    it('hand-maps replyTo to reply_to as a one-element array of { email } objects', async () => {
+    it('hand-maps replyTo to the reply_to object { email }', async () => {
       mockFetch.mockResolvedValueOnce(mailersendSuccessResponse());
 
       await connector.send({
@@ -143,10 +143,10 @@ describe('MailerSendEmailConnector', () => {
         string,
         unknown
       >;
-      expect(body.reply_to).toEqual([{ email: 'reply@example.com' }]);
+      expect(body.reply_to).toEqual({ email: 'reply@example.com' });
     });
 
-    it('maps Buffer attachments to base64 content with content_type and filename', async () => {
+    it('maps Buffer attachments to base64 content and filename (the API has no content_type field)', async () => {
       mockFetch.mockResolvedValueOnce(mailersendSuccessResponse());
       const fileBuf = Buffer.from('PDF-CONTENT-BYTES');
 
@@ -169,10 +169,11 @@ describe('MailerSendEmailConnector', () => {
         attachments: Array<Record<string, string>>;
       };
       expect(body.attachments).toHaveLength(1);
+      // developers.mailersend.com/api/v1/email: attachments.* are content,
+      // filename, disposition, id — no content_type.
       expect(body.attachments[0]).toEqual({
         filename: 'report.pdf',
         content: fileBuf.toString('base64'),
-        content_type: 'application/pdf',
       });
     });
 
@@ -439,6 +440,130 @@ describe('MailerSendEmailConnector', () => {
       }
     });
 
+    describe('202 with a suppression warnings body', () => {
+      const suppressedRecipient = {
+        email: 'suppressed@recipient.com',
+        name: 'Suppressed Recipient',
+        reasons: ['blocklisted'],
+      };
+
+      it('ALL_SUPPRESSED (no x-message-id, "Email is not sent") → invalid_recipient', async () => {
+        const warningsBody = {
+          message: 'There are some warnings for your request.',
+          warnings: [
+            {
+              type: 'ALL_SUPPRESSED',
+              message: 'All of the recipients provided have been suppressed.',
+              recipients: [suppressedRecipient],
+            },
+          ],
+        };
+        mockFetch.mockResolvedValueOnce(
+          new Response(JSON.stringify(warningsBody), {
+            status: 202,
+            headers: { 'content-type': 'application/json' },
+          }),
+        );
+
+        try {
+          await connector.send({
+            from: 'sender@example.com',
+            to: 'suppressed@recipient.com',
+            subject: 's',
+            text: 't',
+          });
+          expect.unreachable('Should have thrown');
+        } catch (err) {
+          expect(err).toBeInstanceOf(ConnectorError);
+          const e = err as ConnectorError;
+          expect(e.providerCode).toBe('invalid_recipient');
+          expect(e.statusCode).toBe(202);
+          expect(e.providerMessage).toBe('All of the recipients provided have been suppressed.');
+          expect((e.cause as { raw: unknown }).raw).toEqual(warningsBody);
+        }
+      });
+
+      it('SOME_SUPPRESSED (x-message-id present) → success with warnings in raw', async () => {
+        const warningsBody = {
+          message: 'There are some warnings for your request.',
+          warnings: [
+            {
+              type: 'SOME_SUPPRESSED',
+              warning: 'Some of the recipients have been suppressed.',
+              recipients: [suppressedRecipient],
+            },
+          ],
+        };
+        mockFetch.mockResolvedValueOnce(
+          new Response(JSON.stringify(warningsBody), {
+            status: 202,
+            headers: {
+              'content-type': 'application/json',
+              'x-message-id': '5e42957d51f1d94a1070a733',
+            },
+          }),
+        );
+
+        const result = await connector.send({
+          from: 'sender@example.com',
+          to: 'suppressed@recipient.com',
+          cc: ['ok@recipient.com'],
+          subject: 's',
+          text: 't',
+        });
+
+        expect(result).toMatchObject({
+          success: true,
+          status: 'queued',
+          providerMessageId: '5e42957d51f1d94a1070a733',
+        });
+        expect(result.raw).toEqual({ ...warningsBody, messageId: '5e42957d51f1d94a1070a733' });
+      });
+
+      it('"Sending paused" 202 (text/plain, empty body) → success', async () => {
+        mockFetch.mockResolvedValueOnce(
+          new Response('', {
+            status: 202,
+            headers: {
+              'content-type': 'text/plain; charset=utf-8',
+              'x-message-id': '5e42957d51f1d94a1070a733',
+              'x-send-paused': 'true',
+            },
+          }),
+        );
+
+        const result = await connector.send({
+          from: 'sender@example.com',
+          to: 'a@b.c',
+          subject: 's',
+          text: 't',
+        });
+
+        expect(result.raw).toEqual({ messageId: '5e42957d51f1d94a1070a733' });
+      });
+
+      it('sendMessage: ALL_SUPPRESSED → invalid_recipient too', async () => {
+        mockFetch.mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({
+              message: 'There are some warnings for your request.',
+              warnings: [{ type: 'ALL_SUPPRESSED', recipients: [suppressedRecipient] }],
+            }),
+            { status: 202, headers: { 'content-type': 'application/json' } },
+          ),
+        );
+
+        await expect(
+          connector.sendMessage({
+            to: ['suppressed@recipient.com'],
+            subject: 's',
+            html: '<p>h</p>',
+            from: 'noreply@example.com',
+          }),
+        ).rejects.toMatchObject({ providerCode: 'invalid_recipient' });
+      });
+    });
+
     it('returns providerMessageId = null when MailerSend omits x-message-id header (defensive)', async () => {
       mockFetch.mockResolvedValueOnce(new Response(null, { status: 202 }));
 
@@ -535,7 +660,7 @@ describe('MailerSendEmailConnector', () => {
 
       expect(body.cc).toEqual([{ email: 'cc@example.com' }]);
       expect(body.bcc).toEqual([{ email: 'bcc@example.com' }]);
-      expect(body.reply_to).toEqual([{ email: 'reply@example.com' }]);
+      expect(body.reply_to).toEqual({ email: 'reply@example.com' });
     });
 
     it('maps attachments to MailerSend format', async () => {
@@ -559,7 +684,6 @@ describe('MailerSendEmailConnector', () => {
       expect(attachments[0]).toEqual({
         filename: 'report.pdf',
         content: fileBuffer.toString('base64'),
-        content_type: 'application/pdf',
       });
     });
 

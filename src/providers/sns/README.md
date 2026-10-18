@@ -18,7 +18,7 @@ const sns = new Sms('sns', {
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
-| `region` | `SnsRegion` | yes | SMS-eligible AWS region — no environment inference |
+| `region` | `SnsRegion` | yes | SMS-eligible AWS region — no environment inference. Must be an AWS region name; anything else (e.g. a value containing `.` or `/`) → `invalid_request` before signing |
 | `accessKeyId` | `string` | yes | IAM access key |
 | `secretAccessKey` | `string` | yes | IAM secret |
 | `sessionToken` | `string` | no | STS token, signed and sent as `X-Amz-Security-Token` when present |
@@ -47,7 +47,7 @@ attributes via `_passthrough.body`.
 | 400 (other) | `invalid_request` |
 | 429 / `Throttling` | `rate_limited` |
 | 5xx | (any) | `provider_unavailable` |
-| network failure | — | `unknown` |
+| network failure | — | `provider_unavailable` |
 
 ## `_passthrough` examples
 

@@ -2,23 +2,21 @@ import crypto from 'crypto';
 import { BaseConnector } from '../../base/base.connector';
 import type {
   IEmailOptions,
-  IAttachmentOptions,
   IEmailProvider,
   ISendMessageSuccessResponse,
   ICheckIntegrationResponse,
   WithPassthrough,
   EmailSendInput,
   EmailSendResult,
-  EmailAttachment,
   IEmailConnector,
 } from '../../types';
 import { ChannelTypeEnum, CheckIntegrationResponseEnum } from '../../types';
 import { ConnectorError } from '../../types';
 import type { ProviderCode } from '../../types';
-import { mergePassthrough, mergeHeaders } from '../../utils';
+import { assertAwsRegion, mergePassthrough, mergeHeaders } from '../../utils';
 import { parseRetryAfter } from '../../utils';
 import { encodeBase64Utf8, encodeBase64Bytes } from '../../utils';
-import { stripCrlf, quoteMimeFilename } from '../../utils';
+import { encodeWords, formatMailbox } from '../../utils';
 import type { SesConfig } from './ses.config';
 import type {
   SesV2SendEmailRequest,
@@ -51,6 +49,7 @@ export class SesEmailConnector
    * inference, no shared-credentials-file fallback.
    */
   async send(input: EmailSendInput): Promise<EmailSendResult> {
+    assertAwsRegion(this.config.region, 'SES');
     const sesInput = input as SesEmailSendInput;
     const requestBody = this.buildSesV2Body(sesInput);
 
@@ -93,6 +92,7 @@ export class SesEmailConnector
         body: serializedBody,
       });
     } catch (error) {
+      if (error instanceof ConnectorError) throw error;
       if ((error as Error)?.name === 'AbortError') {
         throw new ConnectorError({
           message: (error as Error).message ?? 'Request cancelled',
@@ -132,11 +132,8 @@ export class SesEmailConnector
    * `Subject: { Data, Charset }` not just `Subject`).
    */
   private buildSesV2Body(input: SesEmailSendInput): SesV2SendEmailRequest {
-    const senderName = this.config.senderName;
     const fromAddress = input.from || this.config.from;
-    const fromEmailAddress = senderName
-      ? `${senderName} <${fromAddress}>`
-      : fromAddress;
+    const fromEmailAddress = formatMailbox(this.config.senderName, fromAddress);
 
     const destination: SesV2SendEmailRequest['Destination'] = {
       ToAddresses: [input.to],
@@ -150,59 +147,20 @@ export class SesEmailConnector
       destination.BccAddresses = input.bcc;
     }
 
-    let content: SesV2SendEmailRequest['Content'];
-
+    const simple = buildSimpleContent(input.subject, input.html, input.text);
+    const headers = buildSimpleHeaders(input.headers);
+    if (headers.length > 0) simple.Headers = headers;
     if (input.attachments && input.attachments.length > 0) {
-      const mimeMessage = this.buildMimeMessageFromInput(
-        senderName,
-        fromAddress,
-        input.to,
-        input.cc,
-        input.bcc,
-        input.replyTo,
-        input.subject,
-        input.html ?? '',
-        input.text,
-        input.attachments,
-        input.headers,
-      );
-      content = {
-        Raw: {
-          Data: encodeBase64Utf8(mimeMessage),
-        },
-      };
-    } else {
-      const body: {
-        Html?: { Data: string; Charset: string };
-        Text?: { Data: string; Charset: string };
-      } = {};
-
-      if (input.html) {
-        body.Html = { Data: input.html, Charset: 'UTF-8' };
-      }
-
-      if (input.text) {
-        body.Text = { Data: input.text, Charset: 'UTF-8' };
-      }
-
-      const simple: {
-        Subject: { Data: string; Charset: string };
-        Body: typeof body;
-        Headers?: Array<{ Name: string; Value: string }>;
-      } = {
-        Subject: { Data: input.subject, Charset: 'UTF-8' },
-        Body: body,
-      };
-      // SES v2 Simple content supports a Headers list — carry input.headers here
-      // instead of silently dropping them (was lost unless attachments forced raw).
-      if (input.headers && Object.keys(input.headers).length > 0) {
-        simple.Headers = Object.entries(input.headers).map(([Name, Value]) => ({
-          Name,
-          Value: stripCrlf(Value),
-        }));
-      }
-      content = { Simple: simple };
+      simple.Attachments = input.attachments.map((a) => ({
+        FileName: a.filename,
+        RawContent:
+          typeof a.content === 'string' ? encodeBase64Utf8(a.content) : encodeBase64Bytes(a.content),
+        ContentDisposition: a.contentId ? 'INLINE' : 'ATTACHMENT',
+        ...(a.contentType ? { ContentType: a.contentType } : {}),
+        ...(a.contentId ? { ContentId: a.contentId } : {}),
+      }));
     }
+    const content: SesV2SendEmailRequest['Content'] = { Simple: simple };
 
     const requestBody: SesV2SendEmailRequest = {
       FromEmailAddress: fromEmailAddress,
@@ -225,8 +183,12 @@ export class SesEmailConnector
       requestBody.FromEmailAddressIdentityArn = input.sourceArn;
     }
 
-    if (input.returnPath) {
-      requestBody.ReturnPath = input.returnPath;
+    // SES v2 has no `ReturnPath` (that is the v1 SendEmail field); its
+    // equivalent is `FeedbackForwardingEmailAddress`, "The address that you
+    // want bounce and complaint notifications to be sent to".
+    const feedbackAddress = input.feedbackForwardingEmailAddress ?? input.returnPath;
+    if (feedbackAddress) {
+      requestBody.FeedbackForwardingEmailAddress = feedbackAddress;
     }
 
     const sesTags = liftSesTags(input.tags);
@@ -249,8 +211,17 @@ export class SesEmailConnector
     body: SesV2ErrorResponse | null,
     responseHeaders: Headers,
   ): ConnectorError {
+    // restJson1 error code precedence, as botocore (`RestJSONParser
+    // ._inject_error_code`) and aws-sdk-js-v3 (`loadRestJsonErrorCode`) read
+    // it: the `x-amzn-ErrorType` header, then body `code`/`Code`, then
+    // `__type`. SES v2 sends the header on every error.
     const errorType =
-      body?.__type ?? body?.type ?? body?.Code ?? '';
+      responseHeaders.get('x-amzn-errortype') ??
+      body?.code ??
+      body?.Code ??
+      body?.__type ??
+      body?.type ??
+      '';
     const errorMessage =
       body?.message ?? body?.Message ?? '<no vendor message>';
 
@@ -278,128 +249,6 @@ export class SesEmailConnector
     });
   }
 
-  /**
-   * Build a raw multipart MIME message for SES `Content.Raw.Data` from
-   * Thinwrap's `EmailAttachment` shape. Headers are CRLF-stripped to
-   * prevent header injection. Non-ASCII Subject/From/To
-   * ReplyTo headers are RFC 2047 base64-encoded.
-   */
-  private buildMimeMessageFromInput(
-    fromName: string | undefined,
-    fromAddress: string,
-    to: string,
-    cc: string[] | undefined,
-    bcc: string[] | undefined,
-    replyTo: string | undefined,
-    subject: string,
-    html: string,
-    text: string | undefined,
-    attachments: EmailAttachment[],
-    customHeaders?: Record<string, string>,
-  ): string {
-    const boundary = `----=_Part_${randomBoundarySuffix()}`;
-    const altBoundary = `----=_Alt_${randomBoundarySuffix()}`;
-
-    const lines: string[] = [];
-
-    lines.push(`From: ${formatMimeFrom(fromName, fromAddress)}`);
-    lines.push(`To: ${stripCrlf(to)}`);
-
-    if (cc && cc.length > 0) {
-      lines.push(`Cc: ${cc.map(stripCrlf).join(', ')}`);
-    }
-
-    if (bcc && bcc.length > 0) {
-      lines.push(`Bcc: ${bcc.map(stripCrlf).join(', ')}`);
-    }
-
-    if (replyTo) {
-      lines.push(`Reply-To: ${stripCrlf(replyTo)}`);
-    }
-
-    lines.push(`Subject: ${encodeHeaderValue(subject)}`);
-
-    // Consumer `input.headers` — emit them so the raw path doesn't silently drop
-    // them. Skip names the connector already controls (case-insensitive) to avoid
-    // duplicate/conflicting MIME headers; CRLF-strip both name and value.
-    if (customHeaders) {
-      const reserved = new Set([
-        'from', 'to', 'cc', 'bcc', 'reply-to', 'subject', 'mime-version', 'content-type',
-      ]);
-      for (const [name, value] of Object.entries(customHeaders)) {
-        if (reserved.has(name.toLowerCase())) continue;
-        lines.push(`${stripCrlf(name)}: ${stripCrlf(value)}`);
-      }
-    }
-
-    lines.push('MIME-Version: 1.0');
-    lines.push(`Content-Type: multipart/mixed; boundary="${boundary}"`);
-    lines.push('');
-
-    lines.push(`--${boundary}`);
-    lines.push(`Content-Type: multipart/alternative; boundary="${altBoundary}"`);
-    lines.push('');
-
-    // Body parts are base64-encoded (not 8bit): SES honors SMTP's 7-bit limit
-    // and mangles 8-bit content if it rewrites the message (open/click
-    // tracking); an unfolded 8bit line also violates the 998-octet line cap for
-    // minified HTML. base64 is the RFC-/AWS-sanctioned 7-bit-safe encoding.
-    if (text) {
-      lines.push(`--${altBoundary}`);
-      lines.push('Content-Type: text/plain; charset=UTF-8');
-      lines.push('Content-Transfer-Encoding: base64');
-      lines.push('');
-      lines.push(wrapBase64(encodeBase64Utf8(text)));
-      lines.push('');
-    }
-
-    if (html) {
-      lines.push(`--${altBoundary}`);
-      lines.push('Content-Type: text/html; charset=UTF-8');
-      lines.push('Content-Transfer-Encoding: base64');
-      lines.push('');
-      lines.push(wrapBase64(encodeBase64Utf8(html)));
-      lines.push('');
-    }
-
-    lines.push(`--${altBoundary}--`);
-    lines.push('');
-
-    for (const attachment of attachments) {
-      const contentType = stripCrlf(
-        attachment.contentType ?? 'application/octet-stream',
-      );
-      const filename = quoteMimeFilename(attachment.filename);
-
-      let encoded: string;
-      if (typeof attachment.content === 'string') {
-        encoded = encodeBase64Utf8(attachment.content);
-      } else {
-        encoded = encodeBase64Bytes(attachment.content);
-      }
-
-      lines.push(`--${boundary}`);
-      lines.push(`Content-Type: ${contentType}; name=${filename}`);
-      lines.push('Content-Transfer-Encoding: base64');
-
-      if (attachment.contentId) {
-        lines.push(`Content-ID: <${stripCrlf(attachment.contentId)}>`);
-        lines.push(`Content-Disposition: inline; filename=${filename}`);
-      } else {
-        lines.push(`Content-Disposition: attachment; filename=${filename}`);
-      }
-
-      lines.push('');
-      lines.push(wrapBase64(encoded));
-      lines.push('');
-    }
-
-    lines.push(`--${boundary}--`);
-    lines.push('');
-
-    return lines.join('\r\n');
-  }
-
   // ---------------------------------------------------------------------------
   // Novu-compatible `sendMessage()` surface
   // ---------------------------------------------------------------------------
@@ -408,9 +257,10 @@ export class SesEmailConnector
     options: IEmailOptions,
     bridgeProviderData: WithPassthrough<Record<string, unknown>> = {}
   ): Promise<ISendMessageSuccessResponse> {
+    assertAwsRegion(this.config.region, 'SES');
     const senderName = options.senderName ?? this.config.senderName;
     const from = options.from ?? this.config.from;
-    const fromEmailAddress = senderName ? `${senderName} <${from}>` : from;
+    const fromEmailAddress = formatMailbox(senderName, from);
 
     const destination: SesV2SendEmailRequest['Destination'] = {
       ToAddresses: options.to,
@@ -426,44 +276,20 @@ export class SesEmailConnector
 
     const replyToAddresses = options.replyTo ? [options.replyTo] : undefined;
 
-    let content: SesV2SendEmailRequest['Content'];
-
+    const simple = buildSimpleContent(options.subject, options.html, options.text);
     if (options.attachments && options.attachments.length > 0) {
-      const mimeMessage = this.buildMimeMessage(
-        senderName,
-        from,
-        options.to,
-        options.cc,
-        options.bcc,
-        options.replyTo,
-        options.subject,
-        options.html,
-        options.text,
-        options.attachments
-      );
-      content = {
-        Raw: {
-          Data: encodeBase64Utf8(mimeMessage),
-        },
-      };
-    } else {
-      const body: { Html?: { Data: string; Charset: string }; Text?: { Data: string; Charset: string } } = {};
-
-      if (options.html) {
-        body.Html = { Data: options.html, Charset: 'UTF-8' };
-      }
-
-      if (options.text) {
-        body.Text = { Data: options.text, Charset: 'UTF-8' };
-      }
-
-      content = {
-        Simple: {
-          Subject: { Data: options.subject, Charset: 'UTF-8' },
-          Body: body,
-        },
-      };
+      simple.Attachments = options.attachments.map((a) => ({
+        FileName: a.name ?? 'attachment',
+        RawContent: encodeBase64Bytes(a.file),
+        ContentType: a.mime,
+        ContentDisposition: novuDisposition(a.disposition, a.cid),
+        ...(a.cid ? { ContentId: a.cid } : {}),
+      }));
     }
+    // Same SES header rules as `.send()` (reserved names, ASCII, limits).
+    const novuHeaders = buildSimpleHeaders(options.headers);
+    if (novuHeaders.length > 0) simple.Headers = novuHeaders;
+    const content: SesV2SendEmailRequest['Content'] = { Simple: simple };
 
     const requestBody: Record<string, unknown> = {
       FromEmailAddress: fromEmailAddress,
@@ -514,6 +340,7 @@ export class SesEmailConnector
         }
       );
     } catch (error) {
+      if (error instanceof ConnectorError) throw error;
       throw new ConnectorError({
         message: (error as Error).message ?? 'Network error',
         statusCode: null,
@@ -536,9 +363,22 @@ export class SesEmailConnector
     };
   }
 
+  /**
+   * Novu-compatible check: it SENDS `options` as a real email (SES has no
+   * side-effect-free credential probe on this API). Without options there is
+   * nothing to send, so it reports that instead of failing on `undefined`.
+   */
   async checkIntegration(
-    options: IEmailOptions
+    options?: IEmailOptions
   ): Promise<ICheckIntegrationResponse> {
+    if (!options) {
+      return {
+        success: false,
+        message:
+          'SES checkIntegration needs IEmailOptions: it verifies the integration by sending that email.',
+        code: CheckIntegrationResponseEnum.FAILED,
+      };
+    }
     try {
       await this.sendMessage(options);
 
@@ -567,91 +407,6 @@ export class SesEmailConnector
         code: CheckIntegrationResponseEnum.FAILED,
       };
     }
-  }
-
-  private buildMimeMessage(
-    fromName: string | undefined,
-    fromAddress: string,
-    to: string[],
-    cc: string[] | undefined,
-    bcc: string[] | undefined,
-    replyTo: string | undefined,
-    subject: string,
-    html: string,
-    text: string | undefined,
-    attachments: IAttachmentOptions[]
-  ): string {
-    const boundary = `----=_Part_${randomBoundarySuffix()}`;
-    const altBoundary = `----=_Alt_${randomBoundarySuffix()}`;
-
-    const lines: string[] = [];
-
-    lines.push(`From: ${formatMimeFrom(fromName, fromAddress)}`);
-    lines.push(`To: ${to.map(stripCrlf).join(', ')}`);
-
-    if (cc && cc.length > 0) {
-      lines.push(`Cc: ${cc.map(stripCrlf).join(', ')}`);
-    }
-
-    if (bcc && bcc.length > 0) {
-      lines.push(`Bcc: ${bcc.map(stripCrlf).join(', ')}`);
-    }
-
-    if (replyTo) {
-      lines.push(`Reply-To: ${stripCrlf(replyTo)}`);
-    }
-
-    lines.push(`Subject: ${encodeHeaderValue(subject)}`);
-    lines.push('MIME-Version: 1.0');
-    lines.push(`Content-Type: multipart/mixed; boundary="${boundary}"`);
-    lines.push('');
-
-    lines.push(`--${boundary}`);
-    lines.push(`Content-Type: multipart/alternative; boundary="${altBoundary}"`);
-    lines.push('');
-
-    if (text) {
-      lines.push(`--${altBoundary}`);
-      lines.push('Content-Type: text/plain; charset=UTF-8');
-      lines.push('Content-Transfer-Encoding: base64');
-      lines.push('');
-      lines.push(wrapBase64(encodeBase64Utf8(text)));
-      lines.push('');
-    }
-
-    lines.push(`--${altBoundary}`);
-    lines.push('Content-Type: text/html; charset=UTF-8');
-    lines.push('Content-Transfer-Encoding: base64');
-    lines.push('');
-    lines.push(wrapBase64(encodeBase64Utf8(html)));
-    lines.push('');
-
-    lines.push(`--${altBoundary}--`);
-    lines.push('');
-
-    for (const attachment of attachments) {
-      const filename = quoteMimeFilename(attachment.name ?? 'attachment');
-      const contentType = stripCrlf(attachment.mime);
-      lines.push(`--${boundary}`);
-      lines.push(`Content-Type: ${contentType}; name=${filename}`);
-      lines.push('Content-Transfer-Encoding: base64');
-
-      if (attachment.cid) {
-        lines.push(`Content-ID: <${stripCrlf(attachment.cid)}>`);
-        lines.push(`Content-Disposition: ${attachment.disposition ?? 'inline'}; filename=${filename}`);
-      } else {
-        lines.push(`Content-Disposition: ${attachment.disposition ?? 'attachment'}; filename=${filename}`);
-      }
-
-      lines.push('');
-      lines.push(wrapBase64(encodeBase64Bytes(attachment.file)));
-      lines.push('');
-    }
-
-    lines.push(`--${boundary}--`);
-    lines.push('');
-
-    return lines.join('\r\n');
   }
 }
 
@@ -798,31 +553,6 @@ function isoBasicTimestamp(): string {
 }
 
 /**
- * Cryptographically-random suffix for MIME multipart boundaries. Uses
- * `node:crypto` (already imported for SigV4) instead of `Math.random()` so a
- * boundary can't be guessed/forced to collide with attacker-controlled body
- * content.
- */
-function randomBoundarySuffix(): string {
-  return crypto.randomBytes(12).toString('hex');
-}
-
-/**
- * Soft-wrap a base64 attachment payload into CRLF-delimited 76-character
- * lines. RFC 2045 caps base64 lines at 76 chars and RFC 5322 forbids lines
- * longer than 998 octets; an unwrapped attachment >~740 bytes would otherwise
- * emit a single over-long, non-conformant line. Lines are joined with CRLF so
- * they compose correctly with the surrounding `lines.join('\r\n')`.
- */
-function wrapBase64(encoded: string): string {
-  const chunks: string[] = [];
-  for (let i = 0; i < encoded.length; i += 76) {
-    chunks.push(encoded.slice(i, i + 76));
-  }
-  return chunks.join('\r\n');
-}
-
-/**
  * Build the SigV4 canonical query string: keys sorted, each key/value RFC
  * 3986-encoded, joined `k=v&...`. Identical encoding is appended to the
  * request URL so URL and signature agree.
@@ -847,63 +577,162 @@ function rfc3986Encode(value: string): string {
 }
 
 /**
- * Build an RFC 5322 `From` header value from an optional display name and a
- * bare addr-spec. ONLY the display-name phrase is RFC 2047 encoded-word encoded
- * (and only when non-ASCII); the `<addr@domain>` is kept bare so the header
- * stays a parseable mailbox. RFC 2047-encoding the whole `"Name <addr>"` as a
- * single encoded-word (the previous behaviour) swallowed the addr-spec, leaving
- * a `From` with no usable address — SES then rejects the raw message.
- */
-function formatMimeFrom(name: string | undefined, addr: string): string {
-  const bareAddr = stripCrlf(addr);
-  if (!name) return bareAddr;
-  return `${encodeHeaderValue(name)} <${bareAddr}>`;
-}
-
-/**
- * Encode a non-ASCII header value using RFC 2047 base64 encoded-word form
- * (`=?UTF-8?B?<base64>?=`). ASCII values pass through unchanged. Always
- * CRLF-stripped (defence in depth).
- */
-function encodeHeaderValue(value: string): string {
-  const stripped = stripCrlf(value);
-  // eslint-disable-next-line no-control-regex
-  if (/^[\x00-\x7F]*$/.test(stripped)) {
-    return stripped;
-  }
-  const utf8Bytes = new TextEncoder().encode(stripped);
-  return `=?UTF-8?B?${encodeBase64Bytes(utf8Bytes)}?=`;
-}
-
-/**
  * SES expects `EmailTags: [{Name, Value}]`. The base `EmailSendInput.tags` is
  * `string[]`; the narrowed `SesEmailSendInput.tags` is the SES-shaped array.
  * Accept both: bare strings become `{Name: tag, Value: tag}`; already-shaped
  * objects pass through unchanged.
+ *
+ * SES v2 `MessageTag`: Name and Value "can only contain ASCII letters (a–z,
+ * A–Z), numbers (0–9), underscores (_), or dashes (-)" and "no more than 256
+ * characters", so a tag like `welcome email` is rejected here rather than
+ * by a 400 from SES.
  */
 function liftSesTags(
   tags: string[] | SesEmailTag[] | undefined,
 ): SesEmailTag[] {
   if (!tags || tags.length === 0) return [];
   return tags.map((tag) => {
-    if (typeof tag === 'string') {
-      return { Name: tag, Value: tag };
+    const lifted = typeof tag === 'string' ? { Name: tag, Value: tag } : tag;
+    // `RegExp.test(undefined)` tests the string "undefined", so the types are
+    // checked first: a `{ Name }` with no `Value` must not slip through.
+    if (
+      typeof lifted.Name !== 'string' ||
+      typeof lifted.Value !== 'string' ||
+      !SES_TAG_NAME.test(lifted.Name) ||
+      !SES_TAG_VALUE.test(lifted.Value)
+    ) {
+      throw invalidSesRequest(
+        `SES tag ${JSON.stringify(lifted.Name)}: Name and Value may contain only ASCII letters, digits, "_" and "-" (max 256).`,
+      );
     }
-    return tag;
+    return lifted;
+  });
+}
+
+const SES_TAG_NAME = /^[A-Za-z0-9_-]{1,256}$/;
+const SES_TAG_VALUE = /^[A-Za-z0-9_-]{0,256}$/;
+
+type SesSimpleContent = Extract<SesV2SendEmailRequest['Content'], { Simple: unknown }>['Simple'];
+
+function buildSimpleContent(subject: string, html: string | undefined, text: string | undefined): SesSimpleContent {
+  const body: SesSimpleContent['Body'] = {};
+  if (html) body.Html = { Data: html, Charset: 'UTF-8' };
+  if (text) body.Text = { Data: text, Charset: 'UTF-8' };
+  return { Subject: { Data: subject, Charset: 'UTF-8' }, Body: body };
+}
+
+/**
+ * Headers SES sets itself. header-fields.html: with Simple or Templated
+ * content "you cannot set custom header content for headers that are set by
+ * SES; therefore, the following headers are disallowed as custom headers".
+ * Each maps to a typed field instead (named in the error).
+ */
+const SES_DISALLOWED_HEADERS: Readonly<Record<string, string | null>> = {
+  bcc: 'bcc',
+  cc: 'cc',
+  'content-disposition': 'attachments',
+  'content-type': 'html / text / attachments',
+  date: null,
+  from: 'from / senderName',
+  'message-id': null,
+  'mime-version': null,
+  'reply-to': 'replyTo',
+  'return-path': 'feedbackForwardingEmailAddress',
+  subject: 'subject',
+  to: 'to',
+};
+
+// SES v2 MessageHeaderName pattern `^[!-9;-@A-~]+$` (printable ASCII except
+// ":"), max 126.
+const SES_HEADER_NAME = /^[!-9;-@A-~]{1,126}$/;
+// MessageHeaderValue pattern `[ -~]*`, 1–995 characters.
+const SES_HEADER_VALUE = /^[ -~]{1,995}$/;
+
+/**
+ * Map `input.headers` onto SES v2 `Content.Simple.Headers`, enforcing the
+ * model's rules before sending: at most 15 headers, names printable ASCII
+ * without ":", values printable ASCII (non-ASCII values are RFC 2047
+ * encoded-words, which are ASCII), name + value ≤ 996 characters, and none of
+ * the headers SES reserves.
+ */
+function buildSimpleHeaders(
+  headers: Record<string, string> | undefined,
+): Array<{ Name: string; Value: string }> {
+  if (!headers) return [];
+  const entries = Object.entries(headers);
+  if (entries.length > 15) {
+    throw invalidSesRequest('SES accepts at most 15 custom headers per message.');
+  }
+  return entries.map(([name, rawValue]) => {
+    const lower = name.toLowerCase();
+    if (Object.prototype.hasOwnProperty.call(SES_DISALLOWED_HEADERS, lower)) {
+      const field = SES_DISALLOWED_HEADERS[lower];
+      throw invalidSesRequest(
+        field
+          ? `SES does not accept a custom "${name}" header; use ${field} instead.`
+          : `SES does not accept a custom "${name}" header; SES sets it itself.`,
+      );
+    }
+    if (!SES_HEADER_NAME.test(name)) {
+      throw invalidSesRequest(
+        `SES header name ${JSON.stringify(name)} must be 1–126 printable ASCII characters without ":".`,
+      );
+    }
+    const text = String(rawValue);
+    // A CR/LF/NUL in a header value is refused, not rewritten: silently
+    // turning `a\r\nb` into `a b` would send something the caller did not
+    // write. The message names the header, never its value.
+    if (/[\r\n\0]/.test(text)) {
+      throw invalidSesRequest(`SES header "${name}" value must not contain CR, LF or NUL.`);
+    }
+    const value = encodeWords(text.trim());
+    if (!SES_HEADER_VALUE.test(value) || name.length + value.length > 996) {
+      throw invalidSesRequest(
+        `SES header "${name}" value must be 1–995 printable ASCII characters (name + value ≤ 996).`,
+      );
+    }
+    return { Name: name, Value: value };
+  });
+}
+
+/** Novu `IAttachmentOptions.disposition` is free text; SES takes an enum. */
+function novuDisposition(disposition: string | undefined, cid: string | undefined): 'INLINE' | 'ATTACHMENT' {
+  if (disposition !== undefined) return disposition.toLowerCase() === 'inline' ? 'INLINE' : 'ATTACHMENT';
+  return cid ? 'INLINE' : 'ATTACHMENT';
+}
+
+function invalidSesRequest(message: string): ConnectorError {
+  return new ConnectorError({
+    message,
+    statusCode: null,
+    providerCode: 'invalid_request',
+    providerMessage: message,
   });
 }
 
 /**
- * Map SES v2 (HTTP status, error-type-code) to canonical `ProviderCode`.
- * Truth table.
+ * Reduce an AWS error code to its bare name the way the SDKs do. The header
+ * form is `MessageRejected:http://internal.amazon.com/...`, and `__type` may
+ * be `com.amazonaws.services.email#FooException`: aws-sdk-js-v3 cuts at ","
+ * then ":", botocore splits on ":" and then keeps the part after the last
+ * "#".
+ */
+function sanitizeAwsErrorCode(raw: string): string {
+  const cut = raw.split(',')[0]!.split(':')[0]!;
+  return cut.split('#').pop()!.trim();
+}
+
+/**
+ * Map SES v2 (HTTP status, error code) to canonical `ProviderCode`, per the
+ * SendEmail errors in https://docs.aws.amazon.com/ses/latest/APIReference-V2/API_SendEmail.html.
+ * Six of them share HTTP 400, so the code decides. v1 (`AccountSendingPaused*`,
+ * `InvalidEmailAddress`, …) names stay as harmless aliases.
  */
 function mapSesErrorToProviderCode(
   status: number,
   errorType: string,
 ): ProviderCode {
-  // Normalize: SES sometimes uses `com.amazonaws.services.email#FooException`
-  // shape on `__type`; we match the suffix only.
-  const code = errorType.split('#').pop() ?? errorType;
+  const code = sanitizeAwsErrorCode(errorType);
 
   if (status === 429 || status === 454) return 'rate_limited';
   if (status >= 500) return 'provider_unavailable';
@@ -914,13 +743,12 @@ function mapSesErrorToProviderCode(
   if (status === 404) return 'invalid_request';
 
   if (status === 400) {
+    // v2 `MessageRejected`: "The message content is invalid" — the content,
+    // not a recipient.
+    if (code === 'MessageRejected') return 'invalid_request';
+    if (code === 'InvalidEmailAddress') return 'invalid_recipient';
     if (
-      code === 'MessageRejected' ||
-      code === 'InvalidEmailAddress'
-    ) {
-      return 'invalid_recipient';
-    }
-    if (
+      code === 'SendingPausedException' ||
       code === 'AccountSendingPaused' ||
       code === 'AccountSendingPausedException' ||
       code === 'AccountSuspended' ||
@@ -929,24 +757,22 @@ function mapSesErrorToProviderCode(
       return 'auth_failed';
     }
     if (
-      code === 'MailFromDomainNotVerified' ||
-      code === 'MailFromDomainNotVerifiedException' ||
-      code === 'FromEmailAddressNotVerified' ||
-      code === 'FromEmailAddressNotVerifiedException' ||
-      code === 'ValidationException' ||
-      code === 'InvalidParameter' ||
-      code === 'InvalidParameterValue' ||
-      code === 'BadRequestException'
+      code === 'Throttling' ||
+      code === 'ThrottlingException' ||
+      code === 'TooManyRequestsException'
     ) {
-      return 'invalid_request';
-    }
-    if (code === 'Throttling' || code === 'ThrottlingException') {
       return 'rate_limited';
     }
+    // MailFromDomainNotVerifiedException, LimitExceededException,
+    // BadRequestException, NotFoundException, ValidationException, …
     return 'invalid_request';
   }
 
-  if (code === 'Throttling' || code === 'ThrottlingException') {
+  if (
+    code === 'Throttling' ||
+    code === 'ThrottlingException' ||
+    code === 'TooManyRequestsException'
+  ) {
     return 'rate_limited';
   }
 

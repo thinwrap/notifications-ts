@@ -81,6 +81,7 @@ export class SendgridEmailConnector
         body: serializedBody,
       });
     } catch (error) {
+      if (error instanceof ConnectorError) throw error;
       if ((error as Error)?.name === 'AbortError') {
         throw new ConnectorError({
           message: (error as Error).message ?? 'Request cancelled',
@@ -252,8 +253,12 @@ export class SendgridEmailConnector
         content: encodeBase64Bytes(a.file),
         type: a.mime,
         filename: a.name ?? 'attachment',
+        // Same inline mapping as `.send()`: SendGrid references `cid:` images
+        // by `content_id` with `disposition: inline`.
+        ...(a.cid ? { content_id: a.cid, disposition: 'inline' } : {}),
       }));
     }
+    if (options.headers && Object.keys(options.headers).length > 0) payload.headers = { ...options.headers };
 
     const { body, headers: passthroughHeaders } = mergePassthrough(
       payload,
@@ -276,6 +281,7 @@ export class SendgridEmailConnector
         }
       );
     } catch (error) {
+      if (error instanceof ConnectorError) throw error;
       if ((error as Error)?.name === 'AbortError') {
         throw new ConnectorError({
           message: (error as Error).message ?? 'Request cancelled',

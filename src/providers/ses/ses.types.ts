@@ -10,7 +10,15 @@ export interface SesEmailSendInput extends Omit<EmailSendInput, 'tags'> {
   configurationSetName?: string;
   /** SES `FromEmailAddressIdentityArn` — for cross-account sending identity. */
   sourceArn?: string;
-  /** SES `ReturnPath` / bounce destination. */
+  /**
+   * SES v2 `FeedbackForwardingEmailAddress`: "The address that you want bounce
+   * and complaint notifications to be sent to".
+   */
+  feedbackForwardingEmailAddress?: string;
+  /**
+   * @deprecated SES v2 has no `ReturnPath`; this is sent as
+   * `FeedbackForwardingEmailAddress`. Use `feedbackForwardingEmailAddress`.
+   */
   returnPath?: string;
   /**
    * SES `EmailTags` for per-message tagging (analytics, CloudWatch).
@@ -30,7 +38,7 @@ export interface SesV2SendEmailRequest {
     BccAddresses?: string[];
   };
   ReplyToAddresses?: string[];
-  ReturnPath?: string;
+  FeedbackForwardingEmailAddress?: string;
   Content:
     | {
         Simple: {
@@ -39,9 +47,19 @@ export interface SesV2SendEmailRequest {
             Html?: { Data: string; Charset?: string };
             Text?: { Data: string; Charset?: string };
           };
-          // SES v2 Message.Headers — custom email headers (max 15). Lets the
-          // Simple path carry `input.headers` without falling back to raw MIME.
+          // SES v2 Message.Headers — custom email headers (max 15).
           Headers?: Array<{ Name: string; Value: string }>;
+          // SES v2 Message.Attachments (botocore 1.37.27, 2025-04-03).
+          // RawContent is base64 over the HTTPS interface.
+          Attachments?: Array<{
+            FileName: string;
+            RawContent: string;
+            ContentType?: string;
+            ContentDisposition?: 'ATTACHMENT' | 'INLINE';
+            ContentId?: string;
+            ContentDescription?: string;
+            ContentTransferEncoding?: 'BASE64' | 'QUOTED_PRINTABLE' | 'SEVEN_BIT';
+          }>;
         };
       }
     | {
@@ -63,6 +81,7 @@ export interface SesV2SendEmailResponse {
  * legacy XML-translated ones use `Code`). The error mapper reads all variants.
  */
 export interface SesV2ErrorResponse {
+  code?: string;
   message?: string;
   Message?: string;
   type?: string;

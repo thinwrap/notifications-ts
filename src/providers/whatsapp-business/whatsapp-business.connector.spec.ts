@@ -198,7 +198,8 @@ describe('WhatsAppChatConnector', () => {
       }
     });
 
-    it('maps 400 + errorCode 131008 → invalid_recipient', async () => {
+    // Meta Cloud API error codes: 131008 "The request is missing a required parameter."
+    it('maps 400 + errorCode 131008 → invalid_request (missing required parameter)', async () => {
       mockFetch.mockResolvedValueOnce(
         errorResponse(400, {
           error: {
@@ -219,8 +220,29 @@ describe('WhatsAppChatConnector', () => {
         expect(err).toBeInstanceOf(ConnectorError);
         const ce = err as ConnectorError;
         expect(ce.statusCode).toBe(400);
-        expect(ce.providerCode).toBe('invalid_recipient');
+        expect(ce.providerCode).toBe('invalid_request');
       }
+    });
+
+    // https://developers.facebook.com/docs/whatsapp/cloud-api/support/error-codes
+    it.each([
+      [131047, 400, 'invalid_request'], // "More than 24 hours have passed since recipient last replied"
+      [133010, 400, 'invalid_request'], // "Phone number not registered on the WhatsApp Business Platform." (sender)
+      [131056, 400, 'rate_limited'], // "Too many messages sent from the sender phone number to the same recipient"
+      [131048, 400, 'rate_limited'], // spam rate limit
+      [130429, 400, 'rate_limited'], // "Rate limit hit"
+      [0, 400, 'auth_failed'], // "We were unable to authenticate the app user"
+      [10, 400, 'auth_failed'], // "Permission is either not granted or has been removed"
+      [200, 403, 'auth_failed'],
+      [131026, 400, 'invalid_recipient'],
+      [131021, 400, 'invalid_recipient'],
+      [131016, 400, 'provider_unavailable'], // "A service is temporarily unavailable."
+      [99999, 403, 'auth_failed'], // unknown code falls back to HTTP 403
+    ] as const)('maps error.code %i (HTTP %i) → %s', async (code, status, expected) => {
+      mockFetch.mockResolvedValueOnce(errorResponse(status, { error: { code, message: 'm' } }));
+      const err = await connector.send({ to: '+14155550100', body: 'Hello!' }).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(ConnectorError);
+      expect((err as ConnectorError).providerCode).toBe(expected);
     });
 
     it('maps errorCode 80007 → rate_limited with cause.retryAfter + cause.retryAfterSeconds', async () => {

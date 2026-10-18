@@ -11,6 +11,7 @@ import { ChannelTypeEnum } from '../../types';
 import { ConnectorError } from '../../types';
 import type { ProviderCode } from '../../types';
 import { mergePassthrough } from '../../utils';
+import { deepMergeBody } from '../../utils/merge-passthrough';
 import { parseRetryAfter } from '../../utils';
 import type { WonderPushConfig } from './wonderpush.config';
 import type {
@@ -80,6 +81,7 @@ export class WonderPushPushConnector
         body: JSON.stringify(mergedBody),
       });
     } catch (error) {
+      if (error instanceof ConnectorError) throw error;
       if ((error as Error)?.name === 'AbortError') {
         throw new ConnectorError({
           message: (error as Error).message ?? 'Request cancelled',
@@ -133,27 +135,30 @@ export class WonderPushPushConnector
       body.customSegmentation = input.customSegmentation;
     }
 
-    // notification block — merge augmentation override on top of field-level defaults.
+    // notification block. WonderPush's notification object has no top-level
+    // sound/badge/custom and no alert.subtitle: sound, badge and subtitle are
+    // per-platform (`alert.ios.*`, `alert.android.sound`), and custom data
+    // rides under `push.custom` so it reaches the device payload's `custom` key.
     const alert: Record<string, unknown> = {};
     if (input.title !== undefined) alert.title = input.title;
     if (input.body !== undefined) alert.text = input.body;
-    if (input.subtitle !== undefined) alert.subtitle = input.subtitle;
 
-    const notification: Record<string, unknown> = {};
+    const ios: Record<string, unknown> = {};
+    if (input.sound !== undefined) ios.sound = input.sound;
+    if (input.badge !== undefined) ios.badge = input.badge;
+    if (input.subtitle !== undefined) ios.subtitle = input.subtitle;
+    if (Object.keys(ios).length > 0) alert.ios = ios;
+    if (input.sound !== undefined) alert.android = { sound: input.sound };
+
+    let notification: Record<string, unknown> = {};
     if (Object.keys(alert).length > 0) notification.alert = alert;
-    if (input.sound !== undefined) notification.sound = input.sound;
-    if (input.badge !== undefined) notification.badge = input.badge;
-    if (input.data !== undefined) notification.custom = input.data;
+    if (input.data !== undefined) notification.push = { custom: input.data };
 
     if (input.notification !== undefined) {
-      // Augmentation-supplied `notification` overrides field-level defaults at the leaf level.
-      Object.assign(notification, input.notification);
-      if (
-        input.notification.alert !== undefined &&
-        Object.keys(alert).length > 0
-      ) {
-        notification.alert = { ...alert, ...input.notification.alert };
-      }
+      // Augmentation-supplied `notification` overrides field-level defaults at
+      // the leaf level; sibling keys (e.g. its own alert.ios / push entries)
+      // merge rather than replace the derived ones.
+      notification = deepMergeBody(notification, input.notification);
     }
 
     if (Object.keys(notification).length > 0) {
@@ -228,9 +233,16 @@ export class WonderPushPushConnector
       bridgeProviderData._passthrough,
     );
 
+    // WonderPush's form API takes object parameters (`notification`,
+    // `targetSegmentIds`…) as JSON strings, so a passthrough object is
+    // JSON-encoded rather than `String()`-ed into "[object Object]".
     const params = new URLSearchParams();
     for (const [key, value] of Object.entries(body)) {
-      params.append(key, String(value));
+      if (value === undefined || value === null) continue;
+      params.append(
+        key,
+        typeof value === 'object' && !Array.isArray(value) ? JSON.stringify(value) : String(value),
+      );
     }
 
     //  (security): pass accessToken in Authorization header rather than URL
@@ -249,6 +261,7 @@ export class WonderPushPushConnector
         body: params.toString(),
       });
     } catch (error) {
+      if (error instanceof ConnectorError) throw error;
       if ((error as Error)?.name === 'AbortError') {
         throw new ConnectorError({
           message: (error as Error).message ?? 'Request cancelled',

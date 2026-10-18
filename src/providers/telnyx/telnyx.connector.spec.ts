@@ -161,55 +161,55 @@ describe('TelnyxSmsConnector', () => {
       expect(body.auto_detect).toBe(true);
     });
 
-    it('maps 422 with errors[0].code=to_number_invalid → invalid_recipient', async () => {
+    // Telnyx messaging error codes (support.telnyx.com/en/articles/6505121):
+    // 40310 "Invalid 'to' address", 40300 "Blocked due to STOP message".
+    it.each([
+      ['40310', 400, 'invalid_recipient'],
+      ['40300', 400, 'invalid_recipient'],
+      ['40309', 400, 'invalid_recipient'],
+      ['10009', 401, 'auth_failed'],
+      ['40311', 400, 'auth_failed'],
+      ['40313', 400, 'auth_failed'],
+      ['20006', 401, 'auth_failed'],
+      ['10011', 429, 'rate_limited'],
+      ['40318', 400, 'rate_limited'],
+      ['40305', 400, 'invalid_request'],
+      ['40302', 400, 'invalid_request'],
+      ['40316', 422, 'invalid_request'],
+      ['40322', 400, 'invalid_request'],
+      ['20100', 402, 'invalid_request'],
+      ['10004', 422, 'invalid_request'],
+    ] as const)('maps errors[0].code %s (HTTP %i) → %s', async (code, status, expected) => {
       mockFetch.mockResolvedValueOnce(
-        errorResponse(422, {
-          errors: [
-            {
-              code: 'to_number_invalid',
-              title: 'Invalid To Number',
-              detail: 'The to number is invalid',
-            },
-          ],
-        }),
+        errorResponse(status, { errors: [{ code, title: 't', detail: 'd' }] }),
       );
-
-      try {
-        await connector.send({ to: '+1invalid', body: 'x' });
-        expect.unreachable();
-      } catch (err) {
-        const e = err as ConnectorError;
-        expect(e).toBeInstanceOf(ConnectorError);
-        expect(e.statusCode).toBe(422);
-        expect(e.providerCode).toBe('invalid_recipient');
-        expect(e.providerMessage).toBe('The to number is invalid');
-      }
+      const err = await connector.send({ to: '+15559876543', body: 'x' }).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(ConnectorError);
+      expect((err as ConnectorError).providerCode).toBe(expected);
+      expect((err as ConnectorError).statusCode).toBe(status);
     });
 
-    it('maps 400 with errors[0].code=messaging_profile_id_not_found → invalid_recipient', async () => {
+    it('10002 "Invalid phone number" is invalid_recipient only when source.pointer is /to', async () => {
       mockFetch.mockResolvedValueOnce(
-        errorResponse(400, {
-          errors: [
-            {
-              code: 'messaging_profile_id_not_found',
-              title: 'Profile Not Found',
-              detail: 'No messaging profile found',
-            },
-          ],
-        }),
+        errorResponse(422, { errors: [{ code: '10002', detail: 'Invalid phone number', source: { pointer: '/to' } }] }),
       );
+      const e1 = (await connector.send({ to: '+1', body: 'x' }).catch((e: unknown) => e)) as ConnectorError;
+      expect(e1.providerCode).toBe('invalid_recipient');
+      expect(e1.providerMessage).toBe('Invalid phone number');
 
-      try {
-        await connector.send({
-          to: '+15559876543',
-          body: 'x',
-          messagingProfileId: 'bogus',
-        });
-        expect.unreachable();
-      } catch (err) {
-        const e = err as ConnectorError;
-        expect(e.providerCode).toBe('invalid_recipient');
-      }
+      mockFetch.mockResolvedValueOnce(
+        errorResponse(422, { errors: [{ code: '10002', detail: 'Invalid phone number', source: { pointer: '/from' } }] }),
+      );
+      const e2 = (await connector.send({ to: '+15559876543', body: 'x' }).catch((e: unknown) => e)) as ConnectorError;
+      expect(e2.providerCode).toBe('invalid_request');
+    });
+
+    it('a bare 422 with no recognised code is invalid_request, not invalid_recipient', async () => {
+      mockFetch.mockResolvedValueOnce(
+        errorResponse(422, { errors: [{ code: '99999', detail: 'Unprocessable' }] }),
+      );
+      const e = (await connector.send({ to: '+15559876543', body: 'x' }).catch((x: unknown) => x)) as ConnectorError;
+      expect(e.providerCode).toBe('invalid_request');
     });
 
     it('maps 401 → auth_failed', async () => {
@@ -397,7 +397,7 @@ describe('TelnyxSmsConnector', () => {
       mockFetch.mockResolvedValueOnce(
         new Response(
           JSON.stringify({
-            errors: [{ code: '40002', detail: 'Invalid phone number', title: 'Invalid' }],
+            errors: [{ code: '40310', detail: 'Invalid phone number', title: 'Invalid' }],
           }),
           { status: 422 }
         )

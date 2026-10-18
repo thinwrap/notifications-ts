@@ -21,10 +21,10 @@ const mg = new Email('mailgun', {
 | `apiKey` | `string` | yes | Basic-auth password (username is `api`) |
 | `domain` | `string` | yes | Mailgun sending domain |
 | `from` | `string` | yes | Default sender |
-| `senderName` | `string` | no | Composed as `"<senderName> <from>"` |
+| `senderName` | `string` | no | Composed into an RFC 5322 mailbox: quoted when it has specials (`"Acme, Inc." <a@b.c>`), RFC 2047-encoded when non-ASCII |
 | `region` | `'us' \| 'eu'` | no | `us` → `api.mailgun.net`; `eu` → `api.eu.mailgun.net` |
 | `username` | `string` | no | Override Basic-auth username (default `api`) |
-| `baseUrl` | `string` | no | Escape hatch for self-hosted |
+| `baseUrl` | `string` | no | Escape hatch for self-hosted; must be `https://` (the Basic credentials go to it) — anything else → `invalid_request` |
 
 ## Auth setup
 
@@ -40,18 +40,25 @@ Region-derived:
 ## Narrowed input augmentations
 
 Standard email input applies. Mailgun-specific tagging / tracking flags via
-`_passthrough.body`.
+`_passthrough.body`. In the form and multipart bodies alike, an array value
+becomes repeated fields (`o:tag=a&o:tag=b`) and a plain object becomes compact
+JSON (`t:variables`, which Mailgun takes as "A valid JSON-encoded dictionary").
+
+`headers` become `h:<Name>` fields and `replyTo` becomes `h:Reply-To`. Header
+names are case-insensitive, so only one field per name is sent: among
+`headers` the last case-variant wins, and the typed `replyTo` wins over a
+`Reply-To` in `headers`.
 
 ## Error mapping
 
 | Vendor HTTP | Vendor signal | `providerCode` |
 |---|---|---|
-| 401 / 403 | (any) | `auth_failed` |
+| 401 / 402 / 403 | (any) | `auth_failed` |
 | 400 | invalid address | `invalid_recipient` |
 | 400 | (other) | `invalid_request` |
 | 429 | (any) | `rate_limited` |
 | 5xx | (any) | `provider_unavailable` |
-| network failure | — | `unknown` |
+| network failure | — | `provider_unavailable` |
 
 ## `_passthrough` examples
 

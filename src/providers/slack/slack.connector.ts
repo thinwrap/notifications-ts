@@ -10,7 +10,7 @@ import type {
 import { ChannelTypeEnum } from '../../types';
 import { ConnectorError } from '../../types';
 import type { ProviderCode } from '../../types';
-import { mergePassthrough } from '../../utils';
+import { assertHttpsWebhookUrl, mergePassthrough } from '../../utils';
 import { parseRetryAfter } from '../../utils';
 import { redactSecrets, scrubTransportError } from '../../utils';
 import type { SlackConfig } from './slack.config';
@@ -55,16 +55,7 @@ export class SlackChatConnector
       });
     }
 
-    if (!/^https:\/\//i.test(this.config.webhookUrl)) {
-      // The webhook URL IS the credential; refuse cleartext http so a
-      // stale/typo'd config cannot leak the token over the wire.
-      throw new ConnectorError({
-        message: 'Slack webhookUrl must be an https:// URL.',
-        statusCode: 400,
-        providerCode: 'invalid_request',
-        providerMessage: 'Slack webhookUrl must be an https:// URL.',
-      });
-    }
+    assertHttpsWebhookUrl(this.config.webhookUrl, 'Slack');
 
     const connectorBody: Record<string, unknown> = { text: input.body };
     if (input.blocks !== undefined) connectorBody.blocks = input.blocks;
@@ -93,6 +84,7 @@ export class SlackChatConnector
         body: JSON.stringify(mergedBody),
       });
     } catch (error) {
+      if (error instanceof ConnectorError) throw error;
       // The webhook URL IS the credential; redact it from any surfaced error
       // text and never store the raw fetch error (a BYO fetch may embed the URL
       // in the error message / nested fields).
@@ -186,12 +178,17 @@ export class SlackChatConnector
     const webhookUrl = options.webhookUrl ?? this.config.webhookUrl;
 
     if (!webhookUrl) {
+      // Config misuse is a pre-flight `invalid_request`, as on `.send()`.
       throw new ConnectorError({
         message:
           'Missing webhook URL: provide webhookUrl in options or config',
         statusCode: 400,
+        providerCode: 'invalid_request',
+        providerMessage:
+          'Missing webhook URL: provide webhookUrl in options or config',
       });
     }
+    assertHttpsWebhookUrl(webhookUrl, 'Slack');
 
     const payload: Record<string, unknown> = {
       text: options.content,
@@ -214,6 +211,7 @@ export class SlackChatConnector
         body: JSON.stringify(body),
       });
     } catch (error) {
+      if (error instanceof ConnectorError) throw error;
       const err = error as Error;
       const cause = scrubTransportError(err);
       if (err?.name === 'AbortError') {

@@ -264,6 +264,15 @@ describe('MsTeamsChatConnector', () => {
       }
     });
 
+    it('sendMessage(): a 200 with a masked error body is an error too, like .send()', async () => {
+      mockFetch.mockResolvedValueOnce(
+        new Response('Microsoft Teams endpoint returned HTTP error 429 with ContextId abc.', { status: 200 }),
+      );
+      const err = await connector.sendMessage({ content: 'hi' }).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(ConnectorError);
+      expect((err as ConnectorError).providerCode).toBe('rate_limited');
+    });
+
     it('HTTP 200 with a masked error body (throttling) → error, not success', async () => {
       // Teams returns 200 with an error string when throttled; the embedded
       // HTTP code drives the taxonomy (429 → rate_limited).
@@ -280,6 +289,85 @@ describe('MsTeamsChatConnector', () => {
       } catch (err) {
         expect((err as ConnectorError).providerCode).toBe('rate_limited');
       }
+    });
+
+    describe('2xx success detection (Workflows vs legacy connector webhooks)', () => {
+      const legacyUrl = 'https://contoso.webhook.office.com/webhookb2/abc@def/IncomingWebhook/123/456';
+      const powerPlatformUrl =
+        'https://default123.45.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/abc/triggers/manual/paths/invoke?sig=xyz';
+
+      it('202 with an empty body (Logic Apps Request trigger, no Response action) → success', async () => {
+        mockFetch.mockResolvedValueOnce(new Response(null, { status: 202 }));
+
+        const result = await connector.send({ body: 'hi' });
+
+        expect(result).toMatchObject({ success: true, status: 'sent', providerMessageId: null });
+      });
+
+      it('202 from a legacy connector host with a non-"1" body → still success', async () => {
+        mockFetch.mockResolvedValueOnce(new Response('', { status: 202 }));
+        const legacy = new MsTeamsChatConnector({ webhookUrl: legacyUrl });
+
+        await expect(legacy.send({ body: 'hi' })).resolves.toMatchObject({ success: true });
+      });
+
+      it('200 "1" from a legacy connector host → success', async () => {
+        mockFetch.mockResolvedValueOnce(new Response('1', { status: 200 }));
+        const legacy = new MsTeamsChatConnector({ webhookUrl: legacyUrl });
+
+        const result = await legacy.send({ body: 'hi' });
+
+        expect(result).toMatchObject({ success: true, raw: '1' });
+      });
+
+      it('200 "1" from outlook.office.com → success', async () => {
+        mockFetch.mockResolvedValueOnce(new Response('1', { status: 200 }));
+        const legacy = new MsTeamsChatConnector({
+          webhookUrl: 'https://outlook.office.com/webhook/abc@def/IncomingWebhook/123/456',
+        });
+
+        await expect(legacy.send({ body: 'hi' })).resolves.toMatchObject({ success: true });
+      });
+
+      it('200 from a legacy connector host with some other text → failure (502, provider_unavailable)', async () => {
+        mockFetch.mockResolvedValueOnce(
+          new Response('Summary or Text is required.', { status: 200 }),
+        );
+        const legacy = new MsTeamsChatConnector({ webhookUrl: legacyUrl });
+
+        await expect(legacy.send({ body: 'hi' })).rejects.toMatchObject({
+          statusCode: 502,
+          providerCode: 'provider_unavailable',
+        });
+      });
+
+      it('200 with "HTTP error 413" embedded → failure mapped from 413', async () => {
+        mockFetch.mockResolvedValueOnce(
+          new Response(
+            'Webhook message delivery failed with error: Microsoft Teams endpoint returned HTTP error 413 with ContextId tcid=0.',
+            { status: 200 },
+          ),
+        );
+        const legacy = new MsTeamsChatConnector({ webhookUrl: legacyUrl });
+
+        await expect(legacy.send({ body: 'hi' })).rejects.toMatchObject({ statusCode: 413 });
+      });
+
+      it('200 with an empty body from a logic.azure.com Workflows URL → success', async () => {
+        mockFetch.mockResolvedValueOnce(new Response('', { status: 200 }));
+
+        await expect(connector.send({ body: 'hi' })).resolves.toMatchObject({
+          success: true,
+          raw: '',
+        });
+      });
+
+      it('200 with an empty body from a powerplatform.com Workflows URL → success', async () => {
+        mockFetch.mockResolvedValueOnce(new Response('', { status: 200 }));
+        const workflows = new MsTeamsChatConnector({ webhookUrl: powerPlatformUrl });
+
+        await expect(workflows.send({ body: 'hi' })).resolves.toMatchObject({ success: true });
+      });
     });
 
     it('429 + Retry-After: 30 → rate_limited with cause.retryAfter + cause.retryAfterSeconds', async () => {

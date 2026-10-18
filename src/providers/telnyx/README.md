@@ -34,14 +34,21 @@ Standard SMS input. Messaging profile, MMS media URLs, delivery webhook via
 
 ## Error mapping
 
+The vendor `errors[0].code` (a numeric string) is matched first; the HTTP
+status is the fallback. Delivery codes `400xx` arrive only in the async
+`message.finalized` webhook, never in the send response.
+
 | Vendor HTTP | Vendor signal | `providerCode` |
 |---|---|---|
-| 401 / 403 | (any) | `auth_failed` |
-| 422 with code `40300`/`40005` (invalid number) | `invalid_recipient` |
-| 422 / 400 | (other) | `invalid_request` |
-| 429 | (any) | `rate_limited` |
-| 5xx | (any) | `provider_unavailable` |
-| network failure | — | `unknown` |
+| (any) | code `40310` (invalid 'to'), `40300` (STOP opt-out), `40309` (invalid destination region); `10002` with `source.pointer: "/to"` | `invalid_recipient` |
+| (any) | code `10009`, `10010`, `20001`, `20006`, `40311`, `40313` | `auth_failed` |
+| (any) | code `10011`, `40318` (queue full) | `rate_limited` |
+| (any) | code `40301`–`40308`, `40314`, `40316`, `40317`, `40319`–`40325`, `40328`, `40331`, `40333`, `10002`, `10004`, `10015`, `20100` | `invalid_request` |
+| 401 / 403 | (no recognised code) | `auth_failed` |
+| 429 | (no recognised code) | `rate_limited` |
+| 400 / 422 / other 4xx | (no recognised code) | `invalid_request` |
+| 5xx | (no recognised code) | `provider_unavailable` |
+| network failure | — | `provider_unavailable` |
 
 ## `_passthrough` examples
 
@@ -59,3 +66,4 @@ await tx.send({
 
 - API reference: https://developers.telnyx.com/docs/messaging/messages/send-message
 - Errors: https://developers.telnyx.com/docs/messaging/messages/error-codes/index
+- API error shape: https://developers.telnyx.com/development/api-fundamentals/api-errors

@@ -12,7 +12,7 @@ import type {
 import { ChannelTypeEnum } from '../../types';
 import { ConnectorError } from '../../types';
 import type { ProviderCode } from '../../types';
-import { mergePassthrough } from '../../utils';
+import { formatMailbox, mergePassthrough } from '../../utils';
 import { parseRetryAfter } from '../../utils';
 import { encodeBase64Utf8, encodeBase64Bytes } from '../../utils';
 import type { PostmarkConfig } from './postmark.config';
@@ -22,6 +22,30 @@ import type {
 } from './postmark.types';
 
 const POSTMARK_ENDPOINT = 'https://api.postmarkapp.com/email';
+const POSTMARK_TEMPLATE_ENDPOINT = 'https://api.postmarkapp.com/email/withTemplate';
+
+/**
+ * Pick the Postmark endpoint from the final merged body. Template sends are a
+ * different endpoint, `POST /email/withTemplate`, whose body takes
+ * `TemplateId` ("Required if TemplateAlias is not specified") or
+ * `TemplateAlias` plus `TemplateModel`, "The model to be applied to the
+ * specified template to generate HtmlBody, TextBody, and Subject" — so the
+ * connector-built `Subject`/`HtmlBody`/`TextBody` are removed from it.
+ * https://postmarkapp.com/developer/api/templates-api
+ */
+function routePostmarkBody(body: Record<string, unknown>): string {
+  const isTemplate =
+    (body.TemplateId !== undefined && body.TemplateId !== null) ||
+    (typeof body.TemplateAlias === 'string' && body.TemplateAlias !== '');
+  if (!isTemplate) return POSTMARK_ENDPOINT;
+  // TemplateModel is required on this endpoint; an empty model renders the
+  // template with no variables (matches the php/go/py siblings).
+  if (body.TemplateModel === undefined || body.TemplateModel === null) body.TemplateModel = {};
+  delete body.Subject;
+  delete body.HtmlBody;
+  delete body.TextBody;
+  return POSTMARK_TEMPLATE_ENDPOINT;
+}
 
 export class PostmarkEmailConnector
   extends BaseConnector
@@ -37,7 +61,8 @@ export class PostmarkEmailConnector
   /**
    * Thinwrap-native send. Implements `IEmailConnector`.
    * Hand-builds Postmark's PascalCase JSON wire body and POSTs to
-   * `https://api.postmarkapp.com/email` with `X-Postmark-Server-Token` auth.
+   * `https://api.postmarkapp.com/email` (or `/email/withTemplate` when the
+   * merged body names a template) with `X-Postmark-Server-Token` auth.
    *
    * Postmark is also the canonical example of two outlier mappings:
    *   1. **Single-tag normalization** — Postmark accepts only one `Tag` per
@@ -84,7 +109,7 @@ export class PostmarkEmailConnector
         normalizedPassthrough,
       );
 
-    const url = POSTMARK_ENDPOINT;
+    const url = routePostmarkBody(mergedBody);
     const serializedBody = JSON.stringify(mergedBody);
 
     let response: Response;
@@ -95,6 +120,7 @@ export class PostmarkEmailConnector
         body: serializedBody,
       });
     } catch (error) {
+      if (error instanceof ConnectorError) throw error;
       if ((error as Error)?.name === 'AbortError') {
         throw new ConnectorError({
           message: (error as Error).message ?? 'Request cancelled',
@@ -145,9 +171,7 @@ export class PostmarkEmailConnector
    */
   private buildPostmarkBody(input: EmailSendInput): Record<string, unknown> {
     const fromAddress = input.from || this.config.from;
-    const fromEmailAddress = this.config.senderName
-      ? `${this.config.senderName} <${fromAddress}>`
-      : fromAddress;
+    const fromEmailAddress = formatMailbox(this.config.senderName, fromAddress);
 
     const body: Record<string, unknown> = {
       From: fromEmailAddress,
@@ -221,7 +245,7 @@ export class PostmarkEmailConnector
     const errorMessage = body?.Message ?? '<no vendor message>';
     const errorCode = body?.ErrorCode;
 
-    const providerCode = mapPostmarkErrorToProviderCode(status, errorCode);
+    const providerCode = mapPostmarkErrorToProviderCode(status, errorCode, body?.Message);
 
     const retryAfterHeader = responseHeaders.get('retry-after');
     const retryAfterSeconds = retryAfterHeader != null
@@ -251,7 +275,7 @@ export class PostmarkEmailConnector
   ): Promise<ISendMessageSuccessResponse> {
     const senderName = options.senderName ?? this.config.senderName;
     const from = options.from ?? this.config.from;
-    const fromAddress = senderName ? `${senderName} <${from}>` : from;
+    const fromAddress = formatMailbox(senderName, from);
 
     const payload: Record<string, unknown> = {
       From: fromAddress,
@@ -270,18 +294,37 @@ export class PostmarkEmailConnector
         Name: a.name ?? 'attachment',
         Content: encodeBase64Bytes(a.file),
         ContentType: a.mime,
+        // Same as `.send()`: Postmark wants the `cid:` prefix in ContentID.
+        ...(a.cid ? { ContentID: `cid:${a.cid}` } : {}),
       }));
     }
+    if (options.headers && Object.keys(options.headers).length > 0) {
+      payload.Headers = Object.entries(options.headers).map(([Name, Value]) => ({ Name, Value }));
+    }
 
+    // Same top-level PascalCase recasing as `.send()`, so a camelCase
+    // `templateAlias` is seen by the template routing on both surfaces.
+    const bridgePassthrough = bridgeProviderData._passthrough;
+    const normalizedBridgePassthrough =
+      bridgePassthrough?.body !== undefined
+        ? {
+            ...bridgePassthrough,
+            body: transformKeys(bridgePassthrough.body as Record<string, unknown>, CasingEnum.PASCAL_CASE, {
+              deep: false,
+            }) as Record<string, unknown>,
+          }
+        : bridgePassthrough;
     const { body, headers: passthroughHeaders } = mergePassthrough(
       payload,
       {},
-      bridgeProviderData._passthrough,
+      normalizedBridgePassthrough,
     );
+
+    const url = routePostmarkBody(body);
 
     let response: Response;
     try {
-      response = await this.fetchImpl('https://api.postmarkapp.com/email', {
+      response = await this.fetchImpl(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -292,6 +335,7 @@ export class PostmarkEmailConnector
         body: JSON.stringify(body),
       });
     } catch (error) {
+      if (error instanceof ConnectorError) throw error;
       if ((error as Error)?.name === 'AbortError') {
         throw new ConnectorError({
           message: (error as Error).message ?? 'Request cancelled',
@@ -332,14 +376,16 @@ export class PostmarkEmailConnector
 // ---------------------------------------------------------------------------
 
 /**
- * Map Postmark (HTTP status, ErrorCode) to canonical `ProviderCode` per Story
- * 1.12. Postmark's `ErrorCode` is the disambiguator on 422 (and on 200
- * responses with embedded application-level errors, which are routed through
- * this function with `status: 422`).
+ * Map Postmark (HTTP status, ErrorCode) to canonical `ProviderCode`, per the
+ * API error-code table (https://postmarkapp.com/developer/api/overview#error-codes).
+ * `ErrorCode` is the disambiguator on 422 (and on 200 responses with embedded
+ * application-level errors, which are routed through this function with
+ * `status: 422`).
  */
 function mapPostmarkErrorToProviderCode(
   status: number,
   errorCode: number | undefined,
+  message: string | undefined,
 ): ProviderCode {
   if (status === 401 || status === 403) return 'auth_failed';
   if (status === 429) return 'rate_limited';
@@ -347,19 +393,32 @@ function mapPostmarkErrorToProviderCode(
 
   if (status === 422) {
     switch (errorCode) {
-      case 300: // InactiveRecipient
-      case 406: // InboundEmailNotAllowed
-      case 411: // RecipientAddressNull
-      case 412: // RecipientNotInRecipientList
+      case 300:
+        // "Send validation. Covers many messages — zero recipients, invalid
+        // address, missing TextBody/HtmlBody, and recipient, metadata,
+        // attachment, or header limits." Only a message about a To/Cc/Bcc
+        // address ("Invalid 'To' address", "Error parsing 'Cc'") blames a
+        // recipient; a bad From/Reply-To or "Zero recipients specified" is the
+        // request.
+        return /'(?:To|Cc|Bcc)'/i.test(message ?? '') ? 'invalid_recipient' : 'invalid_request';
+      case 406: // Inactive recipient
         return 'invalid_recipient';
-      case 405: // SenderSignatureNotConfirmed
+      case 10: // Bad or missing API token
+      case 412: // Pending account: recipients must share the From domain
+      case 413: // Account not approved to send
+      case 422: // Invalid Server or Account
+      case 1480: // IP not authorized
+      case 405: // not in the current table; kept for older accounts
         return 'auth_failed';
-      case 1003: // InvalidEmailRequest — malformed
-        return 'invalid_request';
       default:
+        // 402 invalid JSON, 403 invalid request fields, 410 batch too large,
+        // 411 attachment type not allowed, 1101 template, 1235/1236 stream.
         return 'invalid_request';
     }
   }
 
+  // 404 unknown resource, 413 over the 10 MB limit, 415 missing headers: all
+  // requests the caller must change.
+  if (status >= 400) return 'invalid_request';
   return 'unknown';
 }

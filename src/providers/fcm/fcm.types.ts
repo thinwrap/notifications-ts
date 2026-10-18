@@ -69,6 +69,8 @@ export interface FcmMessage {
   token?: string;
   topic?: string;
   condition?: string;
+  /** Firebase Installation ID; FCM's replacement for `token`. */
+  fid?: string;
   notification?: {
     title?: string;
     body?: string;

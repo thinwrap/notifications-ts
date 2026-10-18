@@ -16,7 +16,10 @@ import { mergePassthrough } from '../../utils';
 import { parseRetryAfter } from '../../utils';
 import { encodeBase64Utf8, encodeBase64Bytes } from '../../utils';
 import type { MailerSendConfig } from './mailersend.config';
-import type { MailerSendErrorResponse } from './mailersend.types';
+import type {
+  MailerSendAcceptedBody,
+  MailerSendErrorResponse,
+} from './mailersend.types';
 
 const MAILERSEND_ENDPOINT = 'https://api.mailersend.com/v1/email';
 const MAILERSEND_TAG_LIMIT = 5;
@@ -41,7 +44,8 @@ export class MailerSendEmailConnector
    * `mergePassthrough` so consumer-supplied camelCase keys (e.g., `templateId`,
    * `sendAt`, `inReplyTo`, `personalization`) land as snake_case in the wire
    * body. MailerSend returns 202 Accepted with empty body; the message ID is
-   * carried in the `X-Message-Id` response header.
+   * carried in the `X-Message-Id` response header. A 202 can still carry a
+   * `warnings` body when recipients are suppressed — see `readAcceptedBody`.
    */
   async send(input: EmailSendInput): Promise<EmailSendResult> {
     const connectorBody = this.buildMailerSendBody(input);
@@ -84,6 +88,7 @@ export class MailerSendEmailConnector
         body: serializedBody,
       });
     } catch (error) {
+      if (error instanceof ConnectorError) throw error;
       if ((error as Error)?.name === 'AbortError') {
         throw new ConnectorError({
           message: (error as Error).message ?? 'Request cancelled',
@@ -109,20 +114,65 @@ export class MailerSendEmailConnector
 
     // MailerSend 202 Accepted carries an empty body; the message ID is in the
     // `X-Message-Id` response header.
+    const accepted = await this.readAcceptedBody(response);
     const messageId = response.headers.get('x-message-id');
     return {
       success: true,
       status: 'queued',
       providerMessageId: messageId,
-      raw: { messageId },
+      raw: accepted ? { ...accepted, messageId } : { messageId },
     };
+  }
+
+  /**
+   * Decode a 2xx body, which MailerSend only sends to report suppressed
+   * recipients. `ALL_SUPPRESSED` means "Email is not sent" (and no
+   * `X-Message-Id` is returned), so it is surfaced as `invalid_recipient`;
+   * `SOME_SUPPRESSED` still sends to the rest, so the warnings are returned
+   * for `raw` and the send succeeds.
+   */
+  private async readAcceptedBody(
+    response: Response,
+  ): Promise<MailerSendAcceptedBody | null> {
+    const text = await response.text().catch(() => '');
+    if (text.trim() === '') return null;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      return null;
+    }
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return null;
+    }
+    const body = parsed as MailerSendAcceptedBody;
+    const allSuppressed = Array.isArray(body.warnings)
+      ? body.warnings.find((w) => w?.type === 'ALL_SUPPRESSED')
+      : undefined;
+    if (allSuppressed) {
+      // MailerSend's own examples put the entry's text under `message` for
+      // ALL_SUPPRESSED and under `warning` for SOME_SUPPRESSED; accept either.
+      const message =
+        allSuppressed.message ??
+        allSuppressed.warning ??
+        body.message ??
+        'MailerSend: all recipients suppressed';
+      throw new ConnectorError({
+        message,
+        statusCode: response.status,
+        providerCode: 'invalid_recipient',
+        providerMessage: message,
+        cause: { raw: body },
+      });
+    }
+    return body;
   }
 
   /**
    * Build the MailerSend `/v1/email` wire body from Thinwrap's `EmailSendInput`.
    * Hand-mapped in snake_case (locality): `from`/`to`/`cc`/`bcc`
-   * become `{ email, name? }` objects; `replyTo` is wrapped in a one-element
-   * array as `reply_to`; `headers` (Record) is reshaped to MailerSend's
+   * become `{ email, name? }` objects; `replyTo` becomes the `reply_to`
+   * object `{ email }`; `headers` (Record) is reshaped to MailerSend's
    * Array<{name, value}> shape; `tags` is truncated to MailerSend's 5-tag limit
    * with first-5-wins silent truncation (the >=90% baseline-coverage rule).
    */
@@ -149,7 +199,7 @@ export class MailerSendEmailConnector
       body.bcc = input.bcc.map((e) => ({ email: e }));
     }
     if (input.replyTo) {
-      body.reply_to = [{ email: input.replyTo }];
+      body.reply_to = { email: input.replyTo };
     }
     if (input.html) body.html = input.html;
     if (input.text) body.text = input.text;
@@ -177,7 +227,9 @@ export class MailerSendEmailConnector
           filename: a.filename,
           content: contentBase64,
         };
-        if (a.contentType) att.content_type = a.contentType;
+        // MailerSend's attachment object is {content, filename, disposition,
+        // id}; there is no content-type field (the type comes from the
+        // filename), so `contentType` is not sent.
         if (a.contentId) {
           att.id = a.contentId;
           att.disposition = 'inline';
@@ -249,15 +301,19 @@ export class MailerSendEmailConnector
       payload.bcc = options.bcc.map((email) => ({ email }));
     }
     if (options.replyTo) {
-      payload.reply_to = [{ email: options.replyTo }];
+      payload.reply_to = { email: options.replyTo };
     }
 
     if (options.attachments && options.attachments.length > 0) {
       payload.attachments = options.attachments.map((a) => ({
         filename: a.name ?? 'attachment',
         content: encodeBase64Bytes(a.file),
-        content_type: a.mime,
+        // Same inline mapping as `.send()`: MailerSend's `id` is the Content-ID.
+        ...(a.cid ? { id: a.cid, disposition: 'inline' } : {}),
       }));
+    }
+    if (options.headers && Object.keys(options.headers).length > 0) {
+      payload.headers = Object.entries(options.headers).map(([name, value]) => ({ name, value }));
     }
 
     const { body, headers: passthroughHeaders } = mergePassthrough(
@@ -278,6 +334,7 @@ export class MailerSendEmailConnector
         body: JSON.stringify(body),
       });
     } catch (error) {
+      if (error instanceof ConnectorError) throw error;
       if ((error as Error)?.name === 'AbortError') {
         throw new ConnectorError({
           message: (error as Error).message ?? 'Request cancelled',
@@ -300,6 +357,8 @@ export class MailerSendEmailConnector
         | null;
       throw this.mapVendorError(response.status, errBody, response.headers);
     }
+
+    await this.readAcceptedBody(response);
 
     return {
       id: response.headers.get('x-message-id') ?? undefined,

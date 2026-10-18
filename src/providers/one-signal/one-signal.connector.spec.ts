@@ -85,7 +85,7 @@ describe('OneSignalPushConnector', () => {
       body: 'world',
     };
 
-    it('happy path: HTTP 200 with id returns providerMessageId; Basic auth header present', async () => {
+    it('happy path (legacy REST API key): HTTP 200 with id returns providerMessageId; legacy v1 URL + Basic auth', async () => {
       mockFetch.mockResolvedValueOnce(
         jsonResponse({ id: 'notif-1', recipients: 1 }),
       );
@@ -139,6 +139,91 @@ describe('OneSignalPushConnector', () => {
       expect(body.include_subscription_ids).toBeUndefined();
     });
 
+    it('os_v2_ App API key -> POST api.onesignal.com/notifications?c=push with Authorization: Key', async () => {
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({ id: 'notif-v2', external_id: null }),
+      );
+      const v2 = new OneSignalPushConnector({
+        appId: 'app-uuid-123',
+        apiKey: 'os_v2_app_abcdefghijklmnop',
+      });
+
+      const result = await v2.send(baseInput);
+
+      expect(result.providerMessageId).toBe('notif-v2');
+      const [url, init] = mockFetch.mock.calls[0]!;
+      expect(url).toBe('https://api.onesignal.com/notifications?c=push');
+      const headers = (init as RequestInit).headers as Record<string, string>;
+      expect(headers.Authorization).toBe('Key os_v2_app_abcdefghijklmnop');
+      const body = JSON.parse((init as RequestInit).body as string) as Record<string, unknown>;
+      expect(body.app_id).toBe('app-uuid-123');
+      expect(body.include_subscription_ids).toEqual(['sub-1']);
+    });
+
+    it('legacy (non-os_v2_) key -> onesignal.com/api/v1 with Authorization: Basic', async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({ id: 'n' }));
+      const legacy = new OneSignalPushConnector({
+        appId: 'app-uuid-123',
+        apiKey: 'NGEwMGZmMjItY2NkNy0xMWUzLTk5ZDUtMDAwYzI5NDBlNjJj',
+      });
+
+      await legacy.send(baseInput);
+
+      const [url, init] = mockFetch.mock.calls[0]!;
+      expect(url).toBe(ONE_SIGNAL_URL);
+      const headers = (init as RequestInit).headers as Record<string, string>;
+      expect(headers.Authorization).toBe(
+        'Basic NGEwMGZmMjItY2NkNy0xMWUzLTk5ZDUtMDAwYzI5NDBlNjJj',
+      );
+    });
+
+    it('_passthrough include_aliases targeting -> default include_subscription_ids NOT added', async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({ id: 'n' }));
+
+      await connector.send({
+        to: 'sub-abc',
+        title: 'h',
+        body: 'b',
+        _passthrough: {
+          body: {
+            include_aliases: { external_id: ['user-1'] },
+            target_channel: 'push',
+          },
+        },
+      });
+
+      const init = mockFetch.mock.calls[0]![1] as RequestInit;
+      const body = JSON.parse(init.body as string) as Record<string, unknown>;
+      expect(body.include_aliases).toEqual({ external_id: ['user-1'] });
+      expect(body.target_channel).toBe('push');
+      expect(body.include_subscription_ids).toBeUndefined();
+    });
+
+    it.each([
+      ['included_segments', ['Total Subscriptions']],
+      ['excluded_segments', ['Inactive Users']],
+      ['filters', [{ field: 'tag', key: 'level', relation: '>', value: '10' }]],
+      ['include_email_tokens', ['a@example.com']],
+      ['include_phone_numbers', ['+15551234567']],
+      ['include_subscription_ids', ['sub-from-passthrough']],
+    ])('_passthrough %s targeting -> connector default recipient not added', async (key, value) => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({ id: 'n' }));
+
+      await connector.send({
+        to: 'sub-abc',
+        title: 'h',
+        body: 'b',
+        _passthrough: { body: { [key]: value } },
+      });
+
+      const init = mockFetch.mock.calls[0]![1] as RequestInit;
+      const body = JSON.parse(init.body as string) as Record<string, unknown>;
+      expect(body[key]).toEqual(value);
+      if (key !== 'include_subscription_ids') {
+        expect(body.include_subscription_ids).toBeUndefined();
+      }
+    });
+
     it('augmentation override: include_player_ids wins; include_subscription_ids omitted', async () => {
       mockFetch.mockResolvedValueOnce(
         jsonResponse({ id: 'n', recipients: 1 }),
@@ -159,8 +244,9 @@ describe('OneSignalPushConnector', () => {
 
     it('200 with errors: "All included players are not subscribed" -> invalid_recipient', async () => {
       mockFetch.mockResolvedValueOnce(
+        // OneSignal's all-invalid 200 carries no notification id.
         jsonResponse({
-          id: 'n',
+          id: '',
           errors: ['All included players are not subscribed'],
         }),
       );
@@ -170,10 +256,9 @@ describe('OneSignalPushConnector', () => {
       });
     });
 
-    it('200 with errors object: invalid_external_user_ids -> invalid_recipient', async () => {
+    it('200 with no id and errors object: invalid_external_user_ids -> invalid_recipient', async () => {
       mockFetch.mockResolvedValueOnce(
         jsonResponse({
-          id: 'n',
           errors: { invalid_external_user_ids: ['nope-1'] },
         }),
       );
@@ -181,6 +266,21 @@ describe('OneSignalPushConnector', () => {
       await expect(connector.send(baseInput)).rejects.toMatchObject({
         providerCode: 'invalid_recipient',
       });
+    });
+
+    // A 200 with a real id was created for the valid recipients; the invalid
+    // ones are reported in `errors`, which stays on `raw`.
+    it('200 with an id AND errors listing some invalid recipients -> success, errors kept on raw', async () => {
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({
+          id: 'n-1',
+          errors: { invalid_external_user_ids: ['nope-1'] },
+        }),
+      );
+
+      const result = await connector.send(baseInput);
+      expect(result).toMatchObject({ success: true, providerMessageId: 'n-1' });
+      expect((result.raw as { errors?: unknown }).errors).toEqual({ invalid_external_user_ids: ['nope-1'] });
     });
 
     it('HTTP 401 -> auth_failed', async () => {
@@ -317,7 +417,7 @@ describe('OneSignalPushConnector', () => {
   // ===========================================================================
 
   describe('.sendMessage() (brownfield)', () => {
-    it('sends JSON message with Basic auth (same Authorization on both surfaces) and returns { id, date }', async () => {
+    it('legacy key: sends JSON message with Basic auth (same Authorization on both surfaces) and returns { id, date }', async () => {
       mockFetch.mockResolvedValueOnce(successResponse());
 
       const result = await connector.sendMessage(defaultPushOptions);
@@ -330,7 +430,6 @@ describe('OneSignalPushConnector', () => {
       expect(reqInit.headers).toEqual(
         expect.objectContaining({
           'Content-Type': 'application/json',
-          // both surfaces use the same Authorization: Basic header.
           Authorization: 'Basic rest-api-key',
         })
       );
@@ -390,6 +489,36 @@ describe('OneSignalPushConnector', () => {
         expect(connectorErr.providerCode).toBe('auth_failed');
         expect(connectorErr.providerMessage).toBe('Invalid API key');
       }
+    });
+
+    it('os_v2_ App API key -> new endpoint + Key scheme on sendMessage too', async () => {
+      mockFetch.mockResolvedValueOnce(successResponse());
+      const v2 = new OneSignalPushConnector({
+        appId: 'app-uuid-123',
+        apiKey: 'os_v2_app_abcdefghijklmnop',
+      });
+
+      await v2.sendMessage(defaultPushOptions);
+
+      const [url, init] = mockFetch.mock.calls[0]!;
+      expect(url).toBe('https://api.onesignal.com/notifications?c=push');
+      expect((init as RequestInit).headers).toEqual(
+        expect.objectContaining({ Authorization: 'Key os_v2_app_abcdefghijklmnop' }),
+      );
+    });
+
+    it('passthrough include_aliases -> target include_subscription_ids not added', async () => {
+      mockFetch.mockResolvedValueOnce(successResponse());
+
+      await connector.sendMessage(defaultPushOptions, {
+        _passthrough: { body: { include_aliases: { external_id: ['user-1'] } } },
+      });
+
+      const init = mockFetch.mock.calls[0]![1] as RequestInit;
+      const body = JSON.parse(init.body as string) as Record<string, unknown>;
+      expect(body.include_aliases).toEqual({ external_id: ['user-1'] });
+      expect(body.target_channel).toBe('push');
+      expect(body.include_subscription_ids).toBeUndefined();
     });
 
     it('uses overrides for title and body', async () => {

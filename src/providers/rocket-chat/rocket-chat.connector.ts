@@ -5,11 +5,12 @@ import type {
   IChatOptions,
   IChatProvider,
   ISendMessageSuccessResponse,
+  WithPassthrough,
 } from '../../types';
 import { ChannelTypeEnum } from '../../types';
 import { ConnectorError } from '../../types';
 import type { ProviderCode } from '../../types';
-import { mergePassthrough } from '../../utils';
+import { assertHttpsWebhookUrl, mergePassthrough } from '../../utils';
 import { parseRetryAfter } from '../../utils';
 import { redactSecrets, scrubTransportError } from '../../utils';
 import type { RocketChatConfig } from './rocket-chat.config';
@@ -56,16 +57,29 @@ export class RocketChatChatConnector
    * Rocket.Chat-wire-native and pass through verbatim.
    */
   async send(input: RocketChatNarrowedInput): Promise<ChatSendResult> {
-    if (!this.config.webhookUrl) {
+    return this.postToWebhook(this.config.webhookUrl, input);
+  }
+
+  /**
+   * Shared by `.send()` and `sendMessage()`, so a Novu `options.webhookUrl`
+   * override gets the same presence + https checks and redaction as the
+   * configured URL.
+   */
+  private async postToWebhook(
+    webhookUrl: string | undefined,
+    input: RocketChatNarrowedInput,
+  ): Promise<ChatSendResult> {
+    if (!webhookUrl) {
       throw new ConnectorError({
         message:
-          'Rocket.Chat requires `webhookUrl` in config (webhook-URL-as-auth).',
+          'Rocket.Chat requires `webhookUrl` (webhook-URL-as-auth).',
         statusCode: 400,
         providerCode: 'invalid_request',
         providerMessage:
-          'Rocket.Chat requires `webhookUrl` in config (webhook-URL-as-auth).',
+          'Rocket.Chat requires `webhookUrl` (webhook-URL-as-auth).',
       });
     }
+    assertHttpsWebhookUrl(webhookUrl, 'Rocket.Chat');
 
     const connectorBody: Record<string, unknown> = { text: input.body };
     if (input.attachments !== undefined) {
@@ -90,7 +104,7 @@ export class RocketChatChatConnector
 
     let response: Response;
     try {
-      response = await this.sendPostJson(this.config.webhookUrl, mergedBody, {
+      response = await this.sendPostJson(webhookUrl, mergedBody, {
         headers: mergedHeaders,
       });
     } catch (error) {
@@ -100,7 +114,7 @@ export class RocketChatChatConnector
       // error before surfacing.
       if (error instanceof ConnectorError) {
         throw new ConnectorError({
-          message: redactSecrets(error.message, [this.config.webhookUrl]),
+          message: redactSecrets(error.message, [webhookUrl]),
           statusCode: error.statusCode,
           providerCode: error.providerCode,
           cause: scrubTransportError(
@@ -109,7 +123,7 @@ export class RocketChatChatConnector
         });
       }
       throw new ConnectorError({
-        message: redactSecrets((error as Error).message ?? 'Network error', [this.config.webhookUrl]),
+        message: redactSecrets((error as Error).message ?? 'Network error', [webhookUrl]),
         statusCode: null,
         providerCode: 'provider_unavailable',
         cause: scrubTransportError(error),
@@ -230,8 +244,15 @@ export class RocketChatChatConnector
 
   async sendMessage(
     options: IChatOptions,
+    bridgeProviderData: WithPassthrough<Record<string, unknown>> = {},
   ): Promise<ISendMessageSuccessResponse> {
-    await this.send({ body: options.content });
+    // Novu's `webhookUrl` / `channel` overrides and the bridge passthrough are
+    // honoured like on every other webhook connector, not dropped.
+    await this.postToWebhook(options.webhookUrl ?? this.config.webhookUrl, {
+      body: options.content,
+      ...(options.channel !== undefined ? { to: options.channel } : {}),
+      ...(bridgeProviderData._passthrough ? { _passthrough: bridgeProviderData._passthrough } : {}),
+    });
     return {
       id: undefined,
       date: new Date().toISOString(),

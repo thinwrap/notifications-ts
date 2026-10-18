@@ -1,6 +1,28 @@
 import type { SmsSendInput } from '../../types';
 
-export type TwilioRegion = 'us1' | 'us2' | 'ie1' | 'au1' | 'br1' | 'de1' | 'jp1' | 'sg1';
+/**
+ * Twilio REST **processing** regions. Twilio's legacy-regions page: "`ie1` and
+ * `au1` are still valid as processing Region identifiers", while br1/de1/jp1/
+ * sg1/us2 "process in US1 — use `api.twilio.com`" and their
+ * `api.<region>.twilio.com` hosts stopped resolving on 2026-04-28.
+ * https://www.twilio.com/docs/global-infrastructure/edge-locations/legacy-regions
+ */
+export type TwilioRegion = 'us1' | 'ie1' | 'au1';
+
+/**
+ * Twilio's public edge locations (the network ingress point, independent of
+ * the processing region). https://www.twilio.com/docs/global-infrastructure/edge-locations
+ */
+export type TwilioEdge =
+  | 'sydney'
+  | 'sao-paulo'
+  | 'dublin'
+  | 'frankfurt'
+  | 'tokyo'
+  | 'singapore'
+  | 'ashburn'
+  | 'umatilla'
+  | 'roaming';
 
 /**
  * Twilio-specific augmentations of the universal `SmsSendInput`. Each field

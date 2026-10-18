@@ -91,6 +91,28 @@ describe('SnsSmsConnector', () => {
       });
     });
 
+    // botocore validate_region_name: ^(?![0-9]+$)(?!-)[a-zA-Z0-9-]{,63}(?<!-)$ —
+    // the region is part of the host the SigV4 credentials go to.
+    it.each(['x.evil.example/', 'us-east-1.evil.example', '-us-east-1', '123', ''])(
+      'region %j → invalid_request before signing; nothing sent',
+      async (region) => {
+        const c = new SnsSmsConnector({ ...defaultConfig, region });
+        const e1 = await c.send({ to: '+15559876543', body: 'Hi' }).catch((e: unknown) => e);
+        const e2 = await c.sendMessage({ to: '+15559876543', content: 'Hi' }).catch((e: unknown) => e);
+        for (const e of [e1, e2]) {
+          expect(e).toBeInstanceOf(ConnectorError);
+          expect((e as ConnectorError).providerCode).toBe('invalid_request');
+        }
+        expect(mockFetch).not.toHaveBeenCalled();
+      },
+    );
+
+    it('accepts a region outside the SnsRegion hint list (AWS adds SMS regions)', async () => {
+      mockFetch.mockResolvedValueOnce(xmlResponse(snsSuccessXml));
+      await new SnsSmsConnector({ ...defaultConfig, region: 'ap-southeast-5' }).send({ to: '+15559876543', body: 'Hi' });
+      expect(String(mockFetch.mock.calls[0]![0])).toContain('sns.ap-southeast-5.amazonaws.com');
+    });
+
     it('uses the configured region in the endpoint URL (eu-west-1)', async () => {
       mockFetch.mockResolvedValueOnce(xmlResponse(snsSuccessXml));
       const euConnector = new SnsSmsConnector({ ...defaultConfig, region: 'eu-west-1' });

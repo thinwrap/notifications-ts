@@ -10,7 +10,7 @@ import type {
 import { ChannelTypeEnum } from '../../types';
 import { ConnectorError } from '../../types';
 import type { ProviderCode } from '../../types';
-import { mergePassthrough } from '../../utils';
+import { assertHttpsWebhookUrl, mergePassthrough } from '../../utils';
 import { parseRetryAfter } from '../../utils';
 import { redactSecrets, scrubTransportError } from '../../utils';
 import type { DiscordConfig } from './discord.config';
@@ -65,16 +65,7 @@ export class DiscordChatConnector
       });
     }
 
-    if (!/^https:\/\//i.test(this.config.webhookUrl)) {
-      // The webhook URL IS the credential; refuse cleartext http so a
-      // stale/typo'd config cannot leak the token over the wire.
-      throw new ConnectorError({
-        message: 'Discord webhookUrl must be an https:// URL.',
-        statusCode: 400,
-        providerCode: 'invalid_request',
-        providerMessage: 'Discord webhookUrl must be an https:// URL.',
-      });
-    }
+    assertHttpsWebhookUrl(this.config.webhookUrl, 'Discord');
 
     const connectorBody: Record<string, unknown> = { content: input.body };
     if (input.embeds !== undefined) connectorBody.embeds = input.embeds;
@@ -108,6 +99,7 @@ export class DiscordChatConnector
         body: JSON.stringify(mergedBody),
       });
     } catch (error) {
+      if (error instanceof ConnectorError) throw error;
       // The webhook URL IS the credential; redact it from surfaced error text
       // and never store the raw fetch error.
       const err = error as Error;
@@ -228,12 +220,17 @@ export class DiscordChatConnector
     const webhookUrl = options.webhookUrl ?? this.config.webhookUrl;
 
     if (!webhookUrl) {
+      // Config misuse is a pre-flight `invalid_request`, as on `.send()`.
       throw new ConnectorError({
         message:
           'Missing webhook URL: provide webhookUrl in options or config',
         statusCode: 400,
+        providerCode: 'invalid_request',
+        providerMessage:
+          'Missing webhook URL: provide webhookUrl in options or config',
       });
     }
+    assertHttpsWebhookUrl(webhookUrl, 'Discord');
 
     const payload: Record<string, unknown> = {
       content: options.content,
@@ -247,7 +244,9 @@ export class DiscordChatConnector
 
     let response: Response;
     try {
-      response = await this.fetchImpl(`${webhookUrl}?wait=true`, {
+      // Same query append as `.send()`: a webhook URL that already carries
+      // `?thread_id=…` must get `&wait=true`, not a second `?`.
+      response = await this.fetchImpl(this.appendQuery(webhookUrl, { wait: 'true' }), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -256,6 +255,7 @@ export class DiscordChatConnector
         body: JSON.stringify(body),
       });
     } catch (error) {
+      if (error instanceof ConnectorError) throw error;
       const err = error as Error;
       const safeMessage = redactSecrets(err.message ?? 'Network error', [webhookUrl]);
       const cause = scrubTransportError(err);

@@ -9,19 +9,22 @@ import type { PushSendInput } from '../../types';
  *
  * `data` is widened from the base `Record<string, string>` to
  * `Record<string, unknown>` — WonderPush accepts arbitrary JSON inside
- * `notification.custom`.
+ * `notification.push.custom`.
  */
 export interface WonderPushInputAugmentation {
-  /** Arbitrary JSON payload — lands in `notification.custom`. */
+  /** Arbitrary JSON payload — lands in `notification.push.custom`. */
   data?: Record<string, unknown>;
 
-  /** iOS-style subtitle line — lands in `notification.alert.subtitle`. */
+  /** iOS subtitle line — lands in `notification.alert.ios.subtitle`. */
   subtitle?: string;
 
-  /** iOS badge count → `notification.badge`. Sub-baseline (not on `PushSendInput`). */
+  /** iOS badge count → `notification.alert.ios.badge`. Sub-baseline (not on `PushSendInput`). */
   badge?: number;
 
-  /** Notification sound → `notification.sound`. Sub-baseline (not on `PushSendInput`). */
+  /**
+   * Notification sound → both `notification.alert.ios.sound` and
+   * `notification.alert.android.sound`. Sub-baseline (not on `PushSendInput`).
+   */
   sound?: string;
 
   // ---------------------------------------------------------------------------
@@ -45,17 +48,22 @@ export interface WonderPushInputAugmentation {
   // ---------------------------------------------------------------------------
 
   /**
-   * Full `notification` block override. When set, the consumer assumes
-   * responsibility for the structure; the connector still merges the base
-   * `title`/`body`/`sound`/`badge`/`data`/`subtitle` field-level defaults under it.
+   * Full `notification` block override, in WonderPush's notification shape.
+   * Deep-merged over the `title`/`body`/`sound`/`badge`/`data`/`subtitle`
+   * field-level defaults: its leaves win, its other keys are kept alongside.
    */
   notification?: {
-    alert?: { title?: string; text?: string; subtitle?: string };
-    sound?: string;
-    badge?: number;
-    custom?: Record<string, unknown>;
+    alert?: {
+      title?: string;
+      text?: string;
+      ios?: { sound?: string; badge?: number; subtitle?: string; [key: string]: unknown };
+      android?: { sound?: string; [key: string]: unknown };
+      [key: string]: unknown;
+    };
+    push?: { custom?: Record<string, unknown>; [key: string]: unknown };
     actions?: Array<Record<string, unknown>>;
     categories?: string[];
+    [key: string]: unknown;
   };
 
   /** Top-level WonderPush `actions` (also accepted by the API at the root). */

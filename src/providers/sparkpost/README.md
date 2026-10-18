@@ -50,6 +50,12 @@ exception kept local.
 Standard email input applies. Substitution data, options, metadata via
 `_passthrough.body`.
 
+Attachments with a `contentId` go to `content.inline_images` with
+`name` = the `contentId` (SparkPost puts `name` into the image's `Content-ID`
+header, so `<img src="cid:logo">` needs `name: "logo"`); the rest go to
+`content.attachments` with `name` = the filename. `type` is required by
+SparkPost on both and defaults to `application/octet-stream`.
+
 ## Error mapping
 
 | Vendor HTTP | Vendor signal | `providerCode` |
@@ -59,7 +65,7 @@ Standard email input applies. Substitution data, options, metadata via
 | 400 | (other) | `invalid_request` |
 | 420 / 429 | (any) | `rate_limited` |
 | 5xx | (any) | `provider_unavailable` |
-| network failure | — | `unknown` |
+| network failure | — | `provider_unavailable` |
 
 ## `_passthrough` examples
 

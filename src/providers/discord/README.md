@@ -39,7 +39,7 @@ override, avatar override via `_passthrough.body`.
 | 400 invalid `content` / embed | `invalid_request` |
 | 429 with `retry_after` | `rate_limited` |
 | 5xx | (any) | `provider_unavailable` |
-| network failure | — | `unknown` |
+| network failure | — | `provider_unavailable` |
 
 ## `_passthrough` examples
 

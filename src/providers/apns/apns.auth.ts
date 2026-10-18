@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { ConnectorError } from '../../types';
 
 /**
  * Sign an ES256 JWT for APNs token-based authentication using only Node's
@@ -12,8 +13,8 @@ import crypto from 'crypto';
  * ASN.1 `SEQUENCE(INTEGER r, INTEGER s)` signature, which APNs (and the
  * JWT ES256 spec) reject. IEEE P1363 raw `r||s` is required.
  *
- * Per the stateless-wrapper design (2026-05-13 reversal),
- * this is a pure stateless function. No cache parameters, no instance state.
+ * The wrapper holds no state, so this is a pure function: no cache
+ * parameters, no instance state.
  * Consumer-facing memoization lives in `ApnsConfig.tokenCache` and is wired
  * through the connector itself.
  */
@@ -33,10 +34,24 @@ export function createApnsJwt(
 
   const unsignedToken = `${header}.${claims}`;
 
-  const signature = crypto.sign('SHA256', Buffer.from(unsignedToken), {
-    key: privateKey,
-    dsaEncoding: 'ieee-p1363',
-  });
+  let signature: Buffer;
+  try {
+    signature = crypto.sign('SHA256', Buffer.from(unsignedToken), {
+      key: privateKey,
+      dsaEncoding: 'ieee-p1363',
+    });
+  } catch (err) {
+    // node:crypto throws its own Error for a malformed or non-EC key. It is a
+    // credential problem, so it surfaces as auth_failed; only the class name
+    // is kept so no key material or OpenSSL detail about the key is logged.
+    throw new ConnectorError({
+      message: 'APNs privateKey could not sign the provider token (expected the PKCS#8 .p8 EC P-256 key)',
+      statusCode: null,
+      providerCode: 'auth_failed',
+      providerMessage: 'APNs privateKey could not sign the provider token (expected the PKCS#8 .p8 EC P-256 key)',
+      cause: { raw: { exception: (err as Error)?.name ?? 'Error' } },
+    });
+  }
 
   return `${unsignedToken}.${signature.toString('base64url')}`;
 }

@@ -133,26 +133,98 @@ describe('WonderPushPushConnector', () => {
       expect(body.targetSegmentIds).toEqual(['seg-1']);
     });
 
-    it('notification body mapping: title/body/sound/badge/data → notification.{alert,sound,badge,custom}', async () => {
+    it('notification mapping follows the WonderPush notification object: alert.{title,text,ios,android} + push.custom', async () => {
       mockFetch.mockResolvedValueOnce(successResponse({ id: 'wp-5' }));
 
       await connector.send({
         to: 'u1',
         title: 'T',
         body: 'B',
-        sound: 's',
+        subtitle: 'Sub',
+        sound: 'chime.caf',
         badge: 3,
-        data: { k: 'v' },
+        data: { orderId: '42' },
       });
 
       const [, init] = mockFetch.mock.calls[0]!;
       const body = JSON.parse((init as RequestInit).body as string);
-      expect(body.notification).toMatchObject({
-        alert: { title: 'T', text: 'B' },
-        sound: 's',
-        badge: 3,
-        custom: { k: 'v' },
+      expect(body.notification).toEqual({
+        alert: {
+          title: 'T',
+          text: 'B',
+          ios: { sound: 'chime.caf', badge: 3, subtitle: 'Sub' },
+          android: { sound: 'chime.caf' },
+        },
+        push: { custom: { orderId: '42' } },
       });
+      // Keys WonderPush's notification object does not define.
+      expect(body.notification.custom).toBeUndefined();
+      expect(body.notification.sound).toBeUndefined();
+      expect(body.notification.badge).toBeUndefined();
+      expect(body.notification.alert.subtitle).toBeUndefined();
+    });
+
+    it('title/body only → no alert.ios / alert.android / push blocks', async () => {
+      mockFetch.mockResolvedValueOnce(successResponse({ id: 'wp-6' }));
+
+      await connector.send({ to: 'u1', title: 'T', body: 'B' });
+
+      const [, init] = mockFetch.mock.calls[0]!;
+      const body = JSON.parse((init as RequestInit).body as string);
+      expect(body.notification).toEqual({ alert: { title: 'T', text: 'B' } });
+    });
+
+    it('augmentation `notification` deep-merges: caller alert.ios / push keys survive beside the derived ones', async () => {
+      mockFetch.mockResolvedValueOnce(successResponse({ id: 'wp-7' }));
+
+      await connector.send({
+        to: 'u1',
+        title: 'T',
+        body: 'B',
+        sound: 'chime.caf',
+        data: { orderId: '42' },
+        notification: {
+          alert: { text: 'Override', ios: { badge: 5 } },
+          push: { custom: { source: 'augmentation' } },
+        },
+      });
+
+      const [, init] = mockFetch.mock.calls[0]!;
+      const body = JSON.parse((init as RequestInit).body as string);
+      expect(body.notification).toEqual({
+        alert: {
+          title: 'T',
+          text: 'Override',
+          ios: { sound: 'chime.caf', badge: 5 },
+          android: { sound: 'chime.caf' },
+        },
+        push: { custom: { orderId: '42', source: 'augmentation' } },
+      });
+    });
+
+    it('_passthrough.body.notification deep-merges with the derived notification', async () => {
+      mockFetch.mockResolvedValueOnce(successResponse({ id: 'wp-8' }));
+
+      await connector.send({
+        to: 'u1',
+        title: 'T',
+        body: 'B',
+        badge: 2,
+        data: { k: 'v' },
+        _passthrough: {
+          body: {
+            notification: {
+              alert: { ios: { subtitle: 'From passthrough' } },
+              push: { custom: { extra: 1 } },
+            },
+          },
+        },
+      });
+
+      const [, init] = mockFetch.mock.calls[0]!;
+      const body = JSON.parse((init as RequestInit).body as string);
+      expect(body.notification.alert.ios).toEqual({ badge: 2, subtitle: 'From passthrough' });
+      expect(body.notification.push.custom).toEqual({ k: 'v', extra: 1 });
     });
 
     it('forwards optional applicationId from config into the request body', async () => {
@@ -391,6 +463,15 @@ describe('WonderPushPushConnector', () => {
       const params = new URLSearchParams((init as RequestInit).body as string);
       expect(params.get('campaignId')).toBe('campaign-123');
       expect(params.get('targetUserIds')).toBe('target-1');
+    });
+
+    it('JSON-encodes a passthrough object parameter instead of "[object Object]"', async () => {
+      mockFetch.mockResolvedValueOnce(brownfieldSuccess());
+      await connector.sendMessage(defaultPushOptions, {
+        _passthrough: { body: { notification: { alert: { text: 'x', ios: { sound: 'a.caf' } } } } },
+      });
+      const params = new URLSearchParams((mockFetch.mock.calls[0]![1] as RequestInit).body as string);
+      expect(JSON.parse(params.get('notification')!)).toEqual({ alert: { text: 'x', ios: { sound: 'a.caf' } } });
     });
 
     it('should throw ConnectorError on API error', async () => {

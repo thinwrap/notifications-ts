@@ -13,11 +13,11 @@ import type { TokenCacheHook } from '../../types';
  * - `env` — explicit `'production' | 'sandbox'` rather than a boolean, so which
  *   environment a send targets is never ambiguous by default.
  *
- * The connector holds no token state, so it signs a fresh ES256 JWT on every
- * `.send()` by default. Consumers wanting to
- * amortize the local crypto cost across high-volume sends pass a
- * `tokenCache: TokenCacheHook`; the wrapper memoizes through the hook with
- * key `'apns:' + teamId + ':' + keyId + ':' + bundleId`.
+ * The connector holds no token state, so without a `tokenCache` it signs a
+ * fresh ES256 JWT on every send. APNs rejects provider tokens that change more
+ * than once every 20 minutes (`429 TooManyProviderTokenUpdates`), so a shared
+ * `tokenCache` is required in production; the wrapper memoizes through the
+ * hook with key `'apns:' + teamId + ':' + keyId + ':' + bundleId`.
  */
 export interface ApnsConfig {
   teamId: string;
@@ -26,9 +26,10 @@ export interface ApnsConfig {
   bundleId: string;
   env: 'production' | 'sandbox';
   /**
-   * Optional consumer-provided token cache for the ES256 JWT signing. On
-   * vendor 403 the wrapper does NOT evict; eviction is the consumer's
-   * responsibility.
+   * Token cache for the signed ES256 JWT. Optional in the type so tests and
+   * one-off scripts work, but REQUIRED in production: APNs accepts a new
+   * provider token at most once every 20 minutes. On vendor 403 the wrapper
+   * does NOT evict; eviction is the consumer's responsibility.
    */
   tokenCache?: TokenCacheHook;
   /** Bring-your-own fetch implementation BYO-fetch contract. */

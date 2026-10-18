@@ -31,8 +31,20 @@ Generate a token at MailerSend → Domains → API tokens. Static.
 
 ## Narrowed input augmentations
 
-Standard email input applies. Templates, variables, and tags via
-`_passthrough.body`.
+Standard email input applies; `replyTo` is sent as the `reply_to` object
+`{ email }` and `headers` as `[{ name, value }]`. Templates, variables, and
+tags via `_passthrough.body`.
+
+## Response handling
+
+MailerSend answers `202 Accepted` with an empty body and the id in
+`X-Message-Id`. When recipients are suppressed the 202 carries a `warnings`
+body instead:
+
+- `SOME_SUPPRESSED` — sent to the remaining recipients; success, with the
+  vendor body (`message`, `warnings`) kept on `raw` next to `messageId`.
+- `ALL_SUPPRESSED` — nothing is sent and no `X-Message-Id` is returned;
+  surfaced as `invalid_recipient` with the body on `cause.raw`.
 
 ## Error mapping
 
@@ -40,10 +52,11 @@ Standard email input applies. Templates, variables, and tags via
 |---|---|---|
 | 401 / 403 | (any) | `auth_failed` |
 | 422 | invalid recipient | `invalid_recipient` |
+| 202 | `warnings[].type === 'ALL_SUPPRESSED'` | `invalid_recipient` |
 | 422 / 400 | (other) | `invalid_request` |
 | 429 | (any) | `rate_limited` |
 | 5xx | (any) | `provider_unavailable` |
-| network failure | — | `unknown` |
+| network failure | — | `provider_unavailable` |
 
 ## `_passthrough` examples
 

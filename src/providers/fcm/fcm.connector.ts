@@ -10,7 +10,7 @@ import type {
 import { ChannelTypeEnum } from '../../types';
 import { ConnectorError } from '../../types';
 import type { ProviderCode } from '../../types';
-import { mergePassthrough } from '../../utils';
+import { allTargetsFailedError, encodePathSegment, mergePassthrough } from '../../utils';
 import { parseRetryAfter } from '../../utils';
 import type { FcmConfig } from './fcm.config';
 import type {
@@ -72,7 +72,9 @@ export class FcmPushConnector
         input._passthrough,
       );
 
-    const url = `https://fcm.googleapis.com/v1/projects/${this.config.projectId}/messages:send`;
+    dropTokenWhenOtherTarget(mergedBody.message);
+
+    const url = `https://fcm.googleapis.com/v1/projects/${encodePathSegment(this.config.projectId, 'FCM projectId')}/messages:send`;
 
     let response: Response;
     try {
@@ -82,6 +84,7 @@ export class FcmPushConnector
         body: JSON.stringify(mergedBody),
       });
     } catch (error) {
+      if (error instanceof ConnectorError) throw error;
       if ((error as Error)?.name === 'AbortError') {
         throw new ConnectorError({
           message: (error as Error).message ?? 'Request cancelled',
@@ -170,9 +173,8 @@ export class FcmPushConnector
    * Platform blocks (android, apns, webpush, fcm_options) forwarded verbatim.
    */
   private buildFcmMessage(input: FcmPushSendInput): FcmMessage {
-    const message: FcmMessage = {
-      token: input.to,
-    };
+    const message: FcmMessage = {};
+    if (input.to) message.token = input.to;
 
     if (input.title !== undefined || input.body !== undefined) {
       message.notification = {};
@@ -252,14 +254,7 @@ export class FcmPushConnector
     options: IPushOptions,
     bridgeProviderData: WithPassthrough<Record<string, unknown>> = {}
   ): Promise<ISendMessageSuccessResponse> {
-    // The Novu surface keeps stateless signing — every call mints
-    // a fresh token. Consumers wanting amortization use the Thinwrap-native
-    // `.send()` surface with a `tokenCache` hook.
-    const { accessToken } = await getAccessToken(
-      this.config.clientEmail,
-      this.config.privateKey,
-      this.fetchImpl,
-    );
+    const accessToken = await this.getAccessTokenViaHookOrFresh();
 
     const overrides = options.overrides ?? {};
     const {
@@ -299,15 +294,40 @@ export class FcmPushConnector
       bridgeProviderData._passthrough,
     );
 
-    const sendUrl = `https://fcm.googleapis.com/v1/projects/${this.config.projectId}/messages:send`;
+    const sendUrl = `https://fcm.googleapis.com/v1/projects/${encodePathSegment(this.config.projectId, 'FCM projectId')}/messages:send`;
 
     const resolvedTitle = (transformedBody.title as string) ?? options.title;
     const content = (transformedBody.body as string) ?? options.content;
     const resolvedType = transformedBody.type as string | undefined;
-    const resolvedAndroid = transformedBody.android as Record<string, unknown> | undefined;
-    const resolvedApns = transformedBody.apns as Record<string, unknown> | undefined;
-    const resolvedFcmOptions = transformedBody.fcm_options as Record<string, unknown> | undefined;
-    const resolvedWebpush = transformedBody.web_push as Record<string, unknown> | undefined;
+    // FCM v1 `notification` holds only title/body/image: icon, color, tag and
+    // sound are `android.notification` fields, and sound/badge go in the APNs
+    // payload's `aps`. Caller-supplied android/apns blocks win per key. A
+    // `type: 'data'` message must stay data-only (silent): an
+    // `android.notification` or an aps sound/badge would make it display.
+    const dataOnly = transformedBody.type === 'data';
+    const resolvedAndroid = withPlatformDefaults(
+      transformedBody.android as Record<string, unknown> | undefined,
+      'notification',
+      dataOnly ? {} : pickDefined({
+        icon: transformedBody.icon,
+        color: transformedBody.color,
+        tag: transformedBody.tag,
+        sound: transformedBody.sound,
+      }),
+    );
+    const resolvedApns = withApsDefaults(
+      transformedBody.apns as Record<string, unknown> | undefined,
+      dataOnly ? {} : pickDefined({ sound: transformedBody.sound, badge: transformedBody.badge }),
+    );
+    // The overrides are collected under Novu's camelCase names (`fcmOptions`,
+    // `webPush`); the wire names are `fcm_options` / `webpush`. Accept either
+    // so a passthrough in wire casing also works.
+    const resolvedFcmOptions = (transformedBody.fcmOptions ?? transformedBody.fcm_options) as
+      | Record<string, unknown>
+      | undefined;
+    const resolvedWebpush = (transformedBody.webPush ??
+      transformedBody.webpush ??
+      transformedBody.web_push) as Record<string, unknown> | undefined;
     const resolvedData = transformedBody.data as Record<string, string> | undefined;
 
     const postMessage = async (message: FcmMessage): Promise<FcmSendResponse> => {
@@ -323,6 +343,7 @@ export class FcmPushConnector
           body: JSON.stringify({ message } as FcmSendRequest),
         });
       } catch (error) {
+        if (error instanceof ConnectorError) throw error;
         if ((error as Error)?.name === 'AbortError') {
           throw new ConnectorError({
             message: (error as Error).message ?? 'Request cancelled',
@@ -349,11 +370,12 @@ export class FcmPushConnector
       return (await response.json()) as FcmSendResponse;
     };
 
-    // Check if topic-based delivery (set via passthrough)
-    if (transformedBody.topic) {
+    // A passthrough topic / condition / fid is a single send to that target
+    // (FCM's targets are mutually exclusive), not one send per device token.
+    if (transformedBody.topic || transformedBody.condition || transformedBody.fid) {
       const message = this.buildLegacyMessage(
         undefined,
-        transformedBody.topic as string,
+        transformedBody.topic as string | undefined,
         resolvedTitle,
         content,
         resolvedType,
@@ -364,6 +386,9 @@ export class FcmPushConnector
         resolvedData,
         options.payload
       );
+      if (transformedBody.condition) message.condition = transformedBody.condition as string;
+      if (transformedBody.fid) message.fid = transformedBody.fid as string;
+      dropTokenWhenOtherTarget(message);
 
       const data = await postMessage(message);
       return {
@@ -395,6 +420,7 @@ export class FcmPushConnector
     );
 
     const ids: string[] = [];
+    const reasons: unknown[] = [];
     let allFailed = true;
 
     for (const result of results) {
@@ -403,6 +429,7 @@ export class FcmPushConnector
         allFailed = false;
       } else {
         const err = result.reason;
+        reasons.push(err);
         if (err instanceof ConnectorError) {
           ids.push(err.providerMessage ?? err.message);
         } else {
@@ -411,13 +438,7 @@ export class FcmPushConnector
       }
     }
 
-    if (allFailed) {
-      throw new ConnectorError({
-        message: `All ${options.target.length} FCM message(s) failed to send`,
-        statusCode: 500,
-        providerMessage: ids.join('; '),
-      });
-    }
+    if (allFailed) throw allTargetsFailedError('FCM', reasons, ids);
 
     return {
       ids,
@@ -518,8 +539,7 @@ export class FcmPushConnector
  *   404 NOT_FOUND            → invalid_recipient (unregistered device token)
  *   403 SENDER_ID_MISMATCH   → auth_failed
  *   429 QUOTA_EXCEEDED       → rate_limited
- *   503 UNAVAILABLE          → provider_unavailable
- *   500 INTERNAL             → provider_unavailable
+ *   5xx (UNAVAILABLE, INTERNAL, gateway errors) → provider_unavailable
  *   * other                  → unknown
  */
 function mapFcmErrorToProviderCode(
@@ -530,8 +550,7 @@ function mapFcmErrorToProviderCode(
   if (status === 403) return 'auth_failed';
   if (status === 404) return 'invalid_recipient';
   if (status === 429) return 'rate_limited';
-  if (status === 503) return 'provider_unavailable';
-  if (status === 500) return 'provider_unavailable';
+  if (status >= 500) return 'provider_unavailable';
   if (status === 400) return 'invalid_request';
 
   // Fallback: vendor `error.status` string may disambiguate when HTTP status
@@ -549,4 +568,51 @@ function mapFcmErrorToProviderCode(
   }
 
   return 'unknown';
+}
+
+/**
+ * FCM `Message` targets are a oneof: "The following is a list of mutually
+ * exclusive fields. At most one of the fields will be set": token, fid, topic,
+ * condition (https://firebase.google.com/docs/reference/fcm/rest/v1/projects.messages).
+ * The connector always seeds `token` from `input.to`, and a deep merge can add
+ * a passthrough `topic`/`condition`/`fid` but never remove `token`, so a
+ * passthrough target replaces it here.
+ */
+function dropTokenWhenOtherTarget(message: unknown): void {
+  if (message === null || typeof message !== 'object') return;
+  const m = message as Record<string, unknown>;
+  const hasOther = (['topic', 'condition', 'fid'] as const).some(
+    (k) => typeof m[k] === 'string' && (m[k] as string).length > 0,
+  );
+  if (hasOther) delete m.token;
+}
+
+function pickDefined(o: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(o)) if (v !== undefined && v !== null && v !== '') out[k] = v;
+  return out;
+}
+
+/** Fill `block[key]` with `defaults` underneath whatever the caller set. */
+function withPlatformDefaults(
+  block: Record<string, unknown> | undefined,
+  key: string,
+  defaults: Record<string, unknown>,
+): Record<string, unknown> | undefined {
+  if (Object.keys(defaults).length === 0) return block;
+  const base = block ?? {};
+  const inner = (base[key] ?? {}) as Record<string, unknown>;
+  return { ...base, [key]: { ...defaults, ...inner } };
+}
+
+/** FCM's `apns` block carries the APNs payload under `payload.aps`. */
+function withApsDefaults(
+  block: Record<string, unknown> | undefined,
+  defaults: Record<string, unknown>,
+): Record<string, unknown> | undefined {
+  if (Object.keys(defaults).length === 0) return block;
+  const base = block ?? {};
+  const payload = (base.payload ?? {}) as Record<string, unknown>;
+  const aps = (payload.aps ?? {}) as Record<string, unknown>;
+  return { ...base, payload: { ...payload, aps: { ...defaults, ...aps } } };
 }

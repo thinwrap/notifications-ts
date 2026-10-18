@@ -24,3 +24,18 @@ export interface MailerSendErrorResponse {
   message: string;
   errors?: Record<string, string[]>;
 }
+
+/**
+ * Body MailerSend attaches to a 202 when recipients were suppressed
+ * (`SOME_SUPPRESSED` — sent to the rest; `ALL_SUPPRESSED` — not sent).
+ * Successful sends otherwise answer 202 with an empty body.
+ */
+export interface MailerSendAcceptedBody {
+  message?: string;
+  warnings?: Array<{
+    type?: string;
+    warning?: string;
+    message?: string;
+    recipients?: Array<Record<string, unknown>>;
+  }>;
+}

@@ -16,11 +16,15 @@ export interface InfobipNarrowedInput extends SmsSendInput {
   notifyUrl?: string;
   /** DLR callback content type. */
   notifyContentType?: 'application/json' | 'application/xml';
-  /** Numeric value paired with `validityPeriodTimeUnit`. */
+  /**
+   * How long Infobip keeps retrying delivery, in `validityPeriodTimeUnit`
+   * (default minutes). Sent as integer minutes — the v2 endpoint's only unit —
+   * rounded up.
+   */
   validityPeriod?: number;
-  /** Unit for `validityPeriod`. */
+  /** Unit `validityPeriod` is given in; converted to minutes, never sent. */
   validityPeriodTimeUnit?: 'SECONDS' | 'MINUTES' | 'HOURS' | 'DAYS';
-  /** Scheduling settings (ISO 8601 `sendAt`). Translates to `sendingDateTime` on the wire. */
+  /** Scheduling settings (ISO 8601 `sendAt`). Sent as `messages[0].sendAt`. */
   scheduleSettings?: {
     bulkId?: string;
     sendAt?: string;

@@ -205,11 +205,29 @@ describe('MailgunEmailConnector', () => {
         ],
       });
 
+      // Mailgun send-attachments guide: `-F inline=@email.jpg` is referenced as
+      // `<img src="cid:email.jpg">` — the filename IS the Content-ID.
       const [, init] = mockFetch.mock.calls[0]!;
       const bodyStr = ((init as RequestInit).body as Buffer).toString();
       expect(bodyStr).toContain(
-        'Content-Disposition: form-data; name="inline"; filename="logo.png"',
+        'Content-Disposition: form-data; name="inline"; filename="logo"',
       );
+    });
+
+    it('sendMessage(): a cid attachment is posted as name="inline" with filename = cid', async () => {
+      mockFetch.mockResolvedValueOnce(mailgunSuccessResponse());
+      await connector.sendMessage({
+        to: ['r@example.com'],
+        subject: 's',
+        html: '<img src="cid:logo">',
+        attachments: [
+          { mime: 'image/png', file: Buffer.from('p'), name: 'logo.png', cid: 'logo' },
+          { mime: 'application/pdf', file: Buffer.from('d'), name: 'doc.pdf' },
+        ],
+      });
+      const bodyStr = ((mockFetch.mock.calls[0]![1] as RequestInit).body as Buffer).toString();
+      expect(bodyStr).toContain('Content-Disposition: form-data; name="inline"; filename="logo"');
+      expect(bodyStr).toContain('Content-Disposition: form-data; name="attachment"; filename="doc.pdf"');
     });
 
     it('includes h:Reply-To when replyTo is provided', async () => {
@@ -298,6 +316,115 @@ describe('MailgunEmailConnector', () => {
     // -------------------------------------------------------------------------
     // Error mapping table
     // -------------------------------------------------------------------------
+
+    // Mailgun: `t:variables` is "A valid JSON-encoded dictionary"; `o:tag`
+    // repeats. A list must become repeated fields, a map compact JSON.
+    it('passthrough lists become repeated fields and maps become JSON (form body)', async () => {
+      mockFetch.mockResolvedValueOnce(mailgunSuccessResponse());
+      await connector.send({
+        from: 'sender@example.com',
+        to: 'r@example.com',
+        subject: 's',
+        text: 't',
+        _passthrough: { body: { 't:variables': { name: 'Ada', n: 1 }, 'o:tracking-tags': ['a', 'b'] } },
+      });
+      const params = new URLSearchParams((mockFetch.mock.calls[0]![1] as RequestInit).body as string);
+      expect(params.get('t:variables')).toBe('{"name":"Ada","n":1}');
+      expect(params.getAll('o:tracking-tags')).toEqual(['a', 'b']);
+    });
+
+    it('passthrough lists/maps are encoded the same way in the multipart body', async () => {
+      mockFetch.mockResolvedValueOnce(mailgunSuccessResponse());
+      await connector.send({
+        from: 'sender@example.com',
+        to: 'r@example.com',
+        subject: 's',
+        text: 't',
+        attachments: [{ filename: 'a.txt', content: 'a' }],
+        _passthrough: { body: { 't:variables': { name: 'Ada' }, 'v:ids': ['1', '2'] } },
+      });
+      const bodyStr = ((mockFetch.mock.calls[0]![1] as RequestInit).body as Buffer).toString();
+      expect(bodyStr).toContain('name="t:variables"\r\n\r\n{"name":"Ada"}\r\n');
+      expect(bodyStr).toContain('name="v:ids"\r\n\r\n1\r\n');
+      expect(bodyStr).toContain('name="v:ids"\r\n\r\n2\r\n');
+      expect(bodyStr).not.toContain('[object Object]');
+    });
+
+    it('one Reply-To field survives: typed replyTo wins over a headers case-variant', async () => {
+      mockFetch.mockResolvedValueOnce(mailgunSuccessResponse());
+      await connector.send({
+        from: 'sender@example.com',
+        to: 'r@example.com',
+        subject: 's',
+        text: 't',
+        replyTo: 'typed@example.com',
+        headers: { 'reply-to': 'header@example.com', 'X-A': '1', 'x-a': '2' },
+      });
+      const params = new URLSearchParams((mockFetch.mock.calls[0]![1] as RequestInit).body as string);
+      const keys = [...params.keys()];
+      expect(keys.filter((k) => k.toLowerCase() === 'h:reply-to')).toEqual(['h:Reply-To']);
+      expect(params.get('h:Reply-To')).toBe('typed@example.com');
+      expect(keys.filter((k) => k.toLowerCase() === 'h:x-a')).toEqual(['h:x-a']);
+      expect(params.get('h:x-a')).toBe('2');
+    });
+
+    it('a passthrough h:reply-to collapses with the typed replyTo (one field, passthrough wins)', async () => {
+      mockFetch.mockResolvedValueOnce(mailgunSuccessResponse());
+      await connector.send({
+        from: 'sender@example.com',
+        to: 'r@example.com',
+        subject: 's',
+        text: 't',
+        replyTo: 'typed@example.com',
+        _passthrough: { body: { 'h:reply-to': 'pt@example.com' } },
+      });
+      const params = new URLSearchParams((mockFetch.mock.calls[0]![1] as RequestInit).body as string);
+      const keys = [...params.keys()].filter((k) => k.toLowerCase() === 'h:reply-to');
+      expect(keys).toEqual(['h:reply-to']);
+      expect(params.get('h:reply-to')).toBe('pt@example.com');
+    });
+
+    it('sendMessage(): options.headers become h: fields and replyTo is not duplicated by a passthrough variant', async () => {
+      mockFetch.mockResolvedValueOnce(mailgunSuccessResponse());
+      await connector.sendMessage(
+        { to: ['r@example.com'], subject: 's', html: '<p>h</p>', replyTo: 'typed@example.com', headers: { 'X-Campaign': 'c1' } },
+        { _passthrough: { body: { 'h:REPLY-TO': 'pt@example.com' } } },
+      );
+      const params = new URLSearchParams((mockFetch.mock.calls[0]![1] as RequestInit).body as string);
+      expect(params.get('h:X-Campaign')).toBe('c1');
+      expect([...params.keys()].filter((k) => k.toLowerCase() === 'h:reply-to')).toEqual(['h:REPLY-TO']);
+    });
+
+    it('from: a display name with specials is quoted', async () => {
+      mockFetch.mockResolvedValueOnce(mailgunSuccessResponse());
+      await new MailgunEmailConnector({ ...defaultConfig, senderName: 'Acme, Inc.' }).send({
+        from: 'sender@example.com',
+        to: 'r@example.com',
+        subject: 's',
+        text: 't',
+      });
+      const params = new URLSearchParams((mockFetch.mock.calls[0]![1] as RequestInit).body as string);
+      expect(params.get('from')).toBe('"Acme, Inc." <sender@example.com>');
+    });
+
+    it('an http:// baseUrl → invalid_request; Basic credentials never sent in cleartext', async () => {
+      const c = new MailgunEmailConnector({ ...defaultConfig, baseUrl: 'http://example.local' });
+      const e1 = await c
+        .send({ from: 'sender@example.com', to: 'r@example.com', subject: 's', text: 't' })
+        .catch((e: unknown) => e);
+      const e2 = await c.sendMessage({ to: ['r@example.com'], subject: 's', html: '<p>h</p>' }).catch((e: unknown) => e);
+      for (const e of [e1, e2]) expect((e as ConnectorError).providerCode).toBe('invalid_request');
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    // API overview: "403 Forbidden — Valid credentials but access denied."
+    it('maps 403 to auth_failed', async () => {
+      mockFetch.mockResolvedValueOnce(mailgunErrorResponse(403, { message: 'Forbidden' }));
+      const err = await connector
+        .send({ from: 'sender@example.com', to: 'r@example.com', subject: 's', text: 't' })
+        .catch((e: unknown) => e);
+      expect((err as ConnectorError).providerCode).toBe('auth_failed');
+    });
 
     it('maps 401 to auth_failed', async () => {
       mockFetch.mockResolvedValueOnce(

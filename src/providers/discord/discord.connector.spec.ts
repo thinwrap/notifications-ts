@@ -71,6 +71,16 @@ describe('DiscordChatConnector', () => {
       expect(result).toEqual({ id: '987654321', date: expect.any(String) });
     });
 
+    // Discord "Execute Webhook": `wait` and `thread_id` are both query params.
+    it('appends wait=true with & when the webhook URL already has ?thread_id', async () => {
+      mockFetch.mockResolvedValueOnce(successResponse());
+      await connector.sendMessage({
+        webhookUrl: 'https://discord.com/api/webhooks/123/abc?thread_id=99',
+        content: 'x',
+      });
+      expect(mockFetch.mock.calls[0]![0]).toBe('https://discord.com/api/webhooks/123/abc?thread_id=99&wait=true');
+    });
+
     it('should use options.webhookUrl over config.webhookUrl', async () => {
       mockFetch.mockResolvedValueOnce(successResponse());
 

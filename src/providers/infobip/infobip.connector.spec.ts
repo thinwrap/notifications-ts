@@ -64,6 +64,33 @@ describe('InfobipSmsConnector', () => {
   // Thinwrap-native `.send()` surface
   // ===========================================================================
 
+  // `baseUrl` is the per-account hostname the `App <apiKey>` credential goes to;
+  // anything but a bare DNS name could redirect it.
+  describe('baseUrl host check', () => {
+    it.each([
+      'https://abc123.api.infobip.com',
+      'abc123.api.infobip.com/',
+      'evil.example/x',
+      'abc123.api.infobip.com:8443',
+      'user@evil.example',
+      'evil.example?x=',
+      'evil.example#f',
+      '-bad.api.infobip.com',
+      'a..b',
+      '',
+    ])('%j → invalid_request before any request, without echoing the value', async (baseUrl) => {
+      const c = new InfobipSmsConnector({ ...defaultConfig, baseUrl });
+      const e1 = await c.send({ to: '+15550000000', body: 'hi' }).catch((e: unknown) => e);
+      const e2 = await c.sendMessage({ to: '+15550000000', content: 'hi' }).catch((e: unknown) => e);
+      for (const e of [e1, e2]) {
+        expect(e).toBeInstanceOf(ConnectorError);
+        expect((e as ConnectorError).providerCode).toBe('invalid_request');
+        if (baseUrl !== '') expect((e as ConnectorError).message).not.toContain(baseUrl);
+      }
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+  });
+
   describe('.send() — Thinwrap-native surface', () => {
     it('2xx happy path: POSTs JSON body with App auth to the per-account /sms/2/text/advanced URL', async () => {
       mockFetch.mockResolvedValueOnce(successResponse());
@@ -176,19 +203,142 @@ describe('InfobipSmsConnector', () => {
         string,
         unknown
       >;
-      // Top-level wire keys.
+      // Top-level wire keys (SmsAdvancedTextualRequest has no send-time field).
       expect(body.bulkId).toBe('bulk-abc');
-      expect(body.sendingDateTime).toBe('2026-06-01T00:00:00Z');
-      // Per-message wire keys.
+      expect(body).not.toHaveProperty('sendingDateTime');
+      expect(body).not.toHaveProperty('sendAt');
+      // Per-message wire keys (SmsTextualMessage).
       const messages = body.messages as Record<string, unknown>[];
+      expect(messages[0]!.sendAt).toBe('2026-06-01T00:00:00Z');
       expect(messages[0]!.callbackData).toBe('cb-data');
       expect(messages[0]!.notifyUrl).toBe('https://example.com/dlr');
       expect(messages[0]!.notifyContentType).toBe('application/json');
       expect(messages[0]!.validityPeriod).toBe(2);
-      expect(messages[0]!.validityPeriodTimeUnit).toBe('MINUTES');
+      expect(messages[0]).not.toHaveProperty('validityPeriodTimeUnit');
       expect(messages[0]!.flash).toBe(true);
       expect(messages[0]!.language).toEqual({ languageCode: 'TR' });
       expect(messages[0]!.transliteration).toBe('TURKISH');
+    });
+
+    it.each([
+      [30, 'SECONDS', 1],
+      [90, 'SECONDS', 2],
+      [45, 'MINUTES', 45],
+      [2, 'HOURS', 120],
+      [1, 'DAYS', 1440],
+      [15, undefined, 15],
+    ] as const)(
+      'validityPeriod %s %s → integer minutes %s, no validityPeriodTimeUnit on the wire',
+      async (value, unit, minutes) => {
+        mockFetch.mockResolvedValueOnce(successResponse());
+
+        await connector.send({
+          to: '+15559876543',
+          body: 'x',
+          validityPeriod: value,
+          ...(unit ? { validityPeriodTimeUnit: unit } : {}),
+        });
+
+        const [, init] = mockFetch.mock.calls[0]!;
+        const body = JSON.parse((init as RequestInit).body as string) as {
+          messages: Record<string, unknown>[];
+        };
+        expect(body.messages[0]!.validityPeriod).toBe(minutes);
+        expect(body.messages[0]).not.toHaveProperty('validityPeriodTimeUnit');
+      },
+    );
+
+    it('language is sent as the SmsLanguage object { languageCode }', async () => {
+      mockFetch.mockResolvedValueOnce(successResponse());
+
+      await connector.send({
+        to: '+15559876543',
+        body: 'x',
+        language: { languageCode: 'ES' },
+      });
+
+      const [, init] = mockFetch.mock.calls[0]!;
+      const body = JSON.parse((init as RequestInit).body as string) as {
+        messages: Record<string, unknown>[];
+      };
+      expect(body.messages[0]!.language).toEqual({ languageCode: 'ES' });
+    });
+
+    describe('HTTP 200 with a per-message status in group 5 (REJECTED)', () => {
+      function rejectedResponse(id: number, name: string, description: string) {
+        return new Response(
+          JSON.stringify({
+            bulkId: 'bulk-rej',
+            messages: [
+              {
+                to: '+15559876543',
+                status: { groupId: 5, groupName: 'REJECTED', id, name, description },
+                messageId: 'infobip-msg-rej',
+              },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
+
+      it.each([
+        [51, 'MISSING_TO', 'invalid_recipient'],
+        [52, 'REJECTED_DESTINATION', 'invalid_recipient'],
+        [9, 'REJECTED_PREFIX_MISSING', 'invalid_recipient'],
+        [15, 'REJECTED_DND', 'invalid_recipient'],
+        [7, 'REJECTED_NOT_ENOUGH_CREDITS', 'invalid_request'],
+        [6, 'REJECTED_SENDER', 'invalid_request'],
+        [87, 'REJECTED_FLOODING_FILTER', 'rate_limited'],
+      ] as const)('status %s %s → %s', async (id, name, providerCode) => {
+        mockFetch.mockResolvedValueOnce(rejectedResponse(id, name, `${name} description`));
+
+        try {
+          await connector.send({ to: '+15559876543', body: 'x' });
+          expect.unreachable('Should have thrown');
+        } catch (err) {
+          expect(err).toBeInstanceOf(ConnectorError);
+          const e = err as ConnectorError;
+          expect(e.providerCode).toBe(providerCode);
+          expect(e.statusCode).toBe(200);
+          expect(e.providerMessage).toBe(`${name} description`);
+          const cause = e.cause as { raw: { bulkId: string }; status: { name: string; groupId: number } };
+          expect(cause.status).toMatchObject({ groupId: 5, name });
+          expect(cause.raw.bulkId).toBe('bulk-rej');
+        }
+      });
+
+      it('groupName REJECTED alone (no groupId) is still an error', async () => {
+        mockFetch.mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({
+              messages: [
+                {
+                  to: '+15559876543',
+                  status: { groupName: 'REJECTED', name: 'REJECTED_DESTINATION' },
+                  messageId: 'm',
+                },
+              ],
+            }),
+            { status: 200 },
+          ),
+        );
+
+        await expect(
+          connector.send({ to: '+15559876543', body: 'x' }),
+        ).rejects.toMatchObject({ providerCode: 'invalid_recipient' });
+      });
+
+      it('PENDING (group 1) on 200 → success', async () => {
+        mockFetch.mockResolvedValueOnce(successResponse());
+
+        const result = await connector.send({ to: '+15559876543', body: 'x' });
+
+        expect(result).toMatchObject({
+          success: true,
+          status: 'sent',
+          providerMessageId: 'infobip-msg-123',
+        });
+      });
     });
 
     it('maps HTTP 401 → auth_failed', async () => {
@@ -367,11 +517,19 @@ describe('InfobipSmsConnector', () => {
         })
       );
 
+      // Infobip "Send SMS message" (POST /sms/3/messages) example:
+      // {"messages":[{"sender":"InfoSMS","destinations":[{"to":"41793026727"}],
+      //   "content":{"text":"This is a sample message"}}]}
       const body = JSON.parse(reqInit.body as string) as Record<string, unknown>;
-      const messages = body.messages as Record<string, unknown>[];
-      expect(messages[0]!.from).toBe('InfoSMS');
-      expect(messages[0]!.destinations).toEqual([{ to: '+15559876543' }]);
-      expect(messages[0]!.text).toBe('Hello from Infobip!');
+      expect(body).toEqual({
+        messages: [
+          {
+            sender: 'InfoSMS',
+            destinations: [{ to: '+15559876543' }],
+            content: { text: 'Hello from Infobip!' },
+          },
+        ],
+      });
 
       expect(result).toEqual({ id: 'infobip-msg-123', date: expect.any(String) });
     });
@@ -388,7 +546,30 @@ describe('InfobipSmsConnector', () => {
       const [, init] = mockFetch.mock.calls[0]!;
       const body = JSON.parse((init as RequestInit).body as string) as Record<string, unknown>;
       const messages = body.messages as Record<string, unknown>[];
-      expect(messages[0]!.from).toBe('+15550000000');
+      expect(messages[0]!.sender).toBe('+15550000000');
+      expect(messages[0]).not.toHaveProperty('from');
+    });
+
+    // v3 200 response: messages[].status.groupName "Possible values" include REJECTED.
+    it('throws on a 200 whose message status is in the REJECTED group, like .send()', async () => {
+      mockFetch.mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            bulkId: 'b1',
+            messages: [
+              {
+                messageId: 'm1',
+                destination: '+15559876543',
+                status: { groupId: 5, groupName: 'REJECTED', id: 51, name: 'REJECTED_DESTINATION', description: 'Invalid destination' },
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+      );
+      const err = await connector.sendMessage({ to: '+15559876543', content: 'Hello' }).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(ConnectorError);
+      expect((err as ConnectorError).providerCode).toBe('invalid_recipient');
     });
 
     it('should merge bridgeProviderData passthrough body', async () => {

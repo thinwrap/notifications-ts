@@ -37,11 +37,13 @@ Standard chat input (`to`, `body`). Telegram-specific (`parse_mode`,
 | Vendor HTTP | Vendor signal | `providerCode` |
 |---|---|---|
 | 401 | (any) | `auth_failed` |
+| 404 | (any) — malformed `/bot<token>/` path, i.e. a bad token | `auth_failed` |
+| 403 | blocked by the user, user deactivated, kicked from / not a member of the chat | `invalid_recipient` |
 | 400 `chat not found` | `invalid_recipient` |
 | 400 | (other) | `invalid_request` |
 | 429 / `retry_after` | (any) | `rate_limited` |
 | 5xx | (any) | `provider_unavailable` |
-| network failure | — | `unknown` |
+| network failure | — | `provider_unavailable` |
 
 ## `_passthrough` examples
 

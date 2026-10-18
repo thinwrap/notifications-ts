@@ -20,7 +20,9 @@ const rc = new Chat('rocket-chat', {
 ## Auth setup
 
 Create an Incoming Webhook in Rocket.Chat → Administration → Integrations →
-New → Incoming. The URL is the credential.
+New → Incoming. The URL is the credential, so it must be `https://`; any other
+scheme is rejected with `invalid_request` before a request is sent (on
+`.send()` and `sendMessage()` alike).
 
 This connector is a breaking-config change from the brownfield (which used
 the REST API with `serverUrl` + `authToken` + `userId` + `roomId`). Per
@@ -45,7 +47,7 @@ attachments via `_passthrough.body`.
 | 400 invalid payload | `invalid_request` |
 | 429 | (any) | `rate_limited` |
 | 5xx | (any) | `provider_unavailable` |
-| network failure | — | `unknown` |
+| network failure | — | `provider_unavailable` |
 
 ## `_passthrough` examples
 

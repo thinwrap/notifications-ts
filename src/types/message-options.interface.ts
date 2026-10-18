@@ -2,7 +2,11 @@ import type { ChannelTypeEnum } from './channel.enum';
 
 export interface IAttachmentOptions {
   mime: string;
-  file: Buffer;
+  /**
+   * File bytes. Typed as `Uint8Array` (a Node `Buffer` is one) so the public
+   * types do not require `@types/node`.
+   */
+  file: Uint8Array;
   name?: string;
   channels?: ChannelTypeEnum[];
   cid?: string;

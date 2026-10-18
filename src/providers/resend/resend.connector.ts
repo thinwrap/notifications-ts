@@ -11,7 +11,7 @@ import type {
 import { ChannelTypeEnum } from '../../types';
 import { ConnectorError } from '../../types';
 import type { ProviderCode } from '../../types';
-import { mergePassthrough } from '../../utils';
+import { formatMailbox, mergePassthrough } from '../../utils';
 import { parseRetryAfter } from '../../utils';
 import { encodeBase64Utf8, encodeBase64Bytes } from '../../utils';
 import type { ResendConfig } from './resend.config';
@@ -21,6 +21,7 @@ import type {
 } from './resend.types';
 
 const RESEND_ENDPOINT = 'https://api.resend.com/emails';
+const RESEND_TAG_VALUE = /^[A-Za-z0-9_-]{1,256}$/;
 
 export class ResendEmailConnector
   extends BaseConnector
@@ -57,6 +58,7 @@ export class ResendEmailConnector
         body: serializedBody,
       });
     } catch (error) {
+      if (error instanceof ConnectorError) throw error;
       throw mapNetworkError(error);
     }
 
@@ -77,11 +79,8 @@ export class ResendEmailConnector
   }
 
   private buildResendBody(input: EmailSendInput): Record<string, unknown> {
-    const senderName = this.config.senderName;
     const fromAddress = input.from || this.config.from;
-    const fromEmailAddress = senderName
-      ? `${senderName} <${fromAddress}>`
-      : fromAddress;
+    const fromEmailAddress = formatMailbox(this.config.senderName, fromAddress);
 
     const body: Record<string, unknown> = {
       from: fromEmailAddress,
@@ -100,7 +99,20 @@ export class ResendEmailConnector
     if (input.replyTo) body.reply_to = input.replyTo;
     if (input.headers) body.headers = input.headers;
     if (input.tags && input.tags.length > 0) {
-      body.tags = input.tags.map((t) => ({ name: 'tag', value: t }));
+      body.tags = input.tags.map((t) => {
+        // Resend: tag name and value "can only contain ASCII letters (a–z,
+        // A–Z), numbers (0–9), underscores (_), or dashes (-)", max 256.
+        if (!RESEND_TAG_VALUE.test(t)) {
+          const message = `Resend tag ${JSON.stringify(t)} may contain only ASCII letters, digits, "_" and "-" (max 256).`;
+          throw new ConnectorError({
+            message,
+            statusCode: null,
+            providerCode: 'invalid_request',
+            providerMessage: message,
+          });
+        }
+        return { name: 'tag', value: t };
+      });
     }
 
     if (input.attachments && input.attachments.length > 0) {
@@ -114,6 +126,9 @@ export class ResendEmailConnector
           content,
         };
         if (a.contentType) mapped.content_type = a.contentType;
+        // Resend: "You can embed images using the content id parameter for
+        // the attachment" (`<img src="cid:...">`).
+        if (a.contentId) mapped.content_id = a.contentId;
         return mapped;
       });
     }
@@ -160,7 +175,7 @@ export class ResendEmailConnector
   ): Promise<ISendMessageSuccessResponse> {
     const senderName = options.senderName ?? this.config.senderName;
     const from = options.from ?? this.config.from;
-    const fromAddress = senderName ? `${senderName} <${from}>` : from;
+    const fromAddress = formatMailbox(senderName, from);
 
     const payload: Record<string, unknown> = {
       from: fromAddress,
@@ -179,8 +194,10 @@ export class ResendEmailConnector
         filename: a.name ?? 'attachment',
         content: encodeBase64Bytes(a.file),
         content_type: a.mime,
+        ...(a.cid ? { content_id: a.cid } : {}),
       }));
     }
+    if (options.headers && Object.keys(options.headers).length > 0) payload.headers = { ...options.headers };
 
     const { body, headers: mergedHeaders } = mergePassthrough(
       payload,
@@ -200,6 +217,7 @@ export class ResendEmailConnector
         body: JSON.stringify(body),
       });
     } catch (error) {
+      if (error instanceof ConnectorError) throw error;
       throw mapNetworkError(error);
     }
 

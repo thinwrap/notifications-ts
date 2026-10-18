@@ -51,7 +51,7 @@ template sends and other v3-API-specific fields, use `_passthrough.body`.
 | 400 | (other) | `invalid_request` |
 | 429 | (any; respects `Retry-After`) | `rate_limited` |
 | 5xx | (any) | `provider_unavailable` |
-| network failure | — | `unknown` |
+| network failure | — | `provider_unavailable` |
 
 ## `_passthrough` examples
 

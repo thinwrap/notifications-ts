@@ -95,6 +95,7 @@ export class BrevoEmailConnector
         body: serializedBody,
       });
     } catch (error) {
+      if (error instanceof ConnectorError) throw error;
       if ((error as Error)?.name === 'AbortError') {
         throw new ConnectorError({
           message: (error as Error).message ?? 'Request cancelled',
@@ -278,6 +279,7 @@ export class BrevoEmailConnector
         content: encodeBase64Bytes(a.file),
       }));
     }
+    if (options.headers && Object.keys(options.headers).length > 0) payload.headers = { ...options.headers };
 
     const { body, headers: passthroughHeaders } = mergePassthrough(
       payload,
@@ -297,6 +299,7 @@ export class BrevoEmailConnector
         body: JSON.stringify(body),
       });
     } catch (error) {
+      if (error instanceof ConnectorError) throw error;
       if ((error as Error)?.name === 'AbortError') {
         throw new ConnectorError({
           message: (error as Error).message ?? 'Request cancelled',

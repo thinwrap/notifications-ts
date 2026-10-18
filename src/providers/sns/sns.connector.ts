@@ -11,7 +11,7 @@ import type {
 import { ChannelTypeEnum } from '../../types';
 import { ConnectorError } from '../../types';
 import type { ProviderCode } from '../../types';
-import { mergeHeaders, mergePassthrough } from '../../utils';
+import { assertAwsRegion, mergeHeaders, mergePassthrough } from '../../utils';
 import { parseRetryAfter } from '../../utils';
 import type { SnsConfig } from './sns.config';
 import type { SnsMessageAttribute, SnsNarrowedInput } from './sns.types';
@@ -96,6 +96,7 @@ export class SnsSmsConnector
         input._passthrough,
       );
 
+    assertAwsRegion(this.config.region, 'SNS');
     const host = `sns.${this.config.region}.amazonaws.com`;
     const params = new URLSearchParams();
     for (const [key, value] of Object.entries(mergedBody)) {
@@ -137,6 +138,7 @@ export class SnsSmsConnector
         body: serializedBody,
       });
     } catch (error) {
+      if (error instanceof ConnectorError) throw error;
       if ((error as Error)?.name === 'AbortError') {
         throw new ConnectorError({
           message: (error as Error).message ?? 'Request cancelled',
@@ -228,6 +230,7 @@ export class SnsSmsConnector
       params.append(key, String(value));
     }
 
+    assertAwsRegion(this.config.region, 'SNS');
     const host = `sns.${this.config.region}.amazonaws.com`;
     const serializedBody = params.toString();
 
@@ -259,6 +262,7 @@ export class SnsSmsConnector
         body: serializedBody,
       });
     } catch (error) {
+      if (error instanceof ConnectorError) throw error;
       if ((error as Error)?.name === 'AbortError') {
         throw new ConnectorError({
           message: (error as Error).message ?? 'Request cancelled',

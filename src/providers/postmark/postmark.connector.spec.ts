@@ -432,7 +432,7 @@ describe('PostmarkEmailConnector', () => {
       mockFetch.mockResolvedValueOnce(
         postmarkSuccessResponse({
           ErrorCode: 300,
-          Message: 'Inactive recipient',
+          Message: "Invalid 'To' address: 'inactive'.",
         }),
       );
 
@@ -449,7 +449,7 @@ describe('PostmarkEmailConnector', () => {
         const e = err as ConnectorError;
         expect(e.statusCode).toBe(422);
         expect(e.providerCode).toBe('invalid_recipient');
-        expect(e.providerMessage).toBe('Inactive recipient');
+        expect(e.providerMessage).toBe("Invalid 'To' address: 'inactive'.");
       }
     });
 
@@ -480,11 +480,11 @@ describe('PostmarkEmailConnector', () => {
       }
     });
 
-    it('maps 422 with ErrorCode 300 (InactiveRecipient) to invalid_recipient', async () => {
+    it('maps 422 ErrorCode 300 (send validation) whose message names an invalid address to invalid_recipient', async () => {
       mockFetch.mockResolvedValueOnce(
         postmarkErrorResponse(422, {
           ErrorCode: 300,
-          Message: 'Inactive recipient',
+          Message: "Error parsing 'To': Illegal email address 'x'.",
         }),
       );
 
@@ -501,6 +501,153 @@ describe('PostmarkEmailConnector', () => {
         expect(e.statusCode).toBe(422);
         expect(e.providerCode).toBe('invalid_recipient');
       }
+    });
+
+    // https://postmarkapp.com/developer/api/overview#error-codes
+    it.each([
+      [300, 'Zero recipients specified', 'invalid_request'],
+      [300, "Invalid 'To' address: 'x'.", 'invalid_recipient'],
+      [300, "Error parsing 'Cc': Illegal email address 'y'.", 'invalid_recipient'],
+      [300, "Invalid 'From' address: 'bad'.", 'invalid_request'],
+      [300, "Invalid 'ReplyTo' address: 'bad'.", 'invalid_request'],
+      [406, 'You tried to send to recipient(s) that have been marked as inactive.', 'invalid_recipient'],
+      [411, 'Attachment file type not allowed.', 'invalid_request'],
+      [412, 'While your account is pending approval, all recipients must share the same domain as the From address.', 'auth_failed'],
+      [413, 'This account is not approved to send email.', 'auth_failed'],
+      [422, 'Invalid Server or Account', 'auth_failed'],
+      [1480, 'IP address not authorized', 'auth_failed'],
+      [1101, 'Template not found', 'invalid_request'],
+      [1235, 'Message stream not found', 'invalid_request'],
+      [402, 'Invalid JSON', 'invalid_request'],
+    ] as const)('maps 422 ErrorCode %i ("%s") → %s', async (code, message, expected) => {
+      mockFetch.mockResolvedValueOnce(postmarkErrorResponse(422, { ErrorCode: code, Message: message }));
+      const err = await connector
+        .send({ from: 'sender@example.com', to: 'r@example.com', subject: 'x', text: 't' })
+        .catch((e: unknown) => e);
+      expect((err as ConnectorError).providerCode).toBe(expected);
+    });
+
+    // templates-api: POST /email/withTemplate takes TemplateId (or TemplateAlias)
+    // + TemplateModel, "The model to be applied to the specified template to
+    // generate HtmlBody, TextBody, and Subject" — no Subject/HtmlBody/TextBody.
+    it('routes to /email/withTemplate when the merged body has TemplateId, dropping Subject/HtmlBody/TextBody', async () => {
+      mockFetch.mockResolvedValueOnce(postmarkSuccessResponse());
+      await connector.send({
+        from: 'sender@example.com',
+        to: 'r@example.com',
+        subject: 'unused',
+        html: '<p>unused</p>',
+        text: 'unused',
+        _passthrough: { body: { TemplateId: 1234, TemplateModel: { name: 'Ada' }, MessageStream: 'outbound' } },
+      });
+      const [url, init] = mockFetch.mock.calls[0]!;
+      expect(url).toBe('https://api.postmarkapp.com/email/withTemplate');
+      const body = JSON.parse((init as RequestInit).body as string) as Record<string, unknown>;
+      expect(body).toMatchObject({
+        TemplateId: 1234,
+        TemplateModel: { name: 'Ada' },
+        MessageStream: 'outbound',
+        To: 'r@example.com',
+      });
+      expect(body).not.toHaveProperty('Subject');
+      expect(body).not.toHaveProperty('HtmlBody');
+      expect(body).not.toHaveProperty('TextBody');
+    });
+
+    it('routes a camelCase templateAlias (recased to TemplateAlias) to /email/withTemplate', async () => {
+      mockFetch.mockResolvedValueOnce(postmarkSuccessResponse());
+      await connector.send({
+        from: 'sender@example.com',
+        to: 'r@example.com',
+        subject: 'unused',
+        text: 'unused',
+        _passthrough: { body: { templateAlias: 'welcome', templateModel: { n: 1 } } },
+      });
+      const [url, init] = mockFetch.mock.calls[0]!;
+      expect(url).toBe('https://api.postmarkapp.com/email/withTemplate');
+      const body = JSON.parse((init as RequestInit).body as string) as Record<string, unknown>;
+      expect(body.TemplateAlias).toBe('welcome');
+      expect(body.TemplateModel).toEqual({ n: 1 });
+      expect(body).not.toHaveProperty('Subject');
+    });
+
+    // templates-api: TemplateModel is "required" on /email/withTemplate.
+    it('sends TemplateModel: {} on /email/withTemplate when the caller gave none', async () => {
+      mockFetch.mockResolvedValueOnce(postmarkSuccessResponse());
+      await connector.send({
+        from: 'sender@example.com',
+        to: 'r@example.com',
+        subject: 'unused',
+        _passthrough: { body: { TemplateAlias: 'welcome' } },
+      });
+      const [url, init] = mockFetch.mock.calls[0]!;
+      expect(url).toBe('https://api.postmarkapp.com/email/withTemplate');
+      expect((JSON.parse((init as RequestInit).body as string) as Record<string, unknown>).TemplateModel).toEqual({});
+    });
+
+    it('stays on /email (keeping Subject/HtmlBody) when no template is named', async () => {
+      mockFetch.mockResolvedValueOnce(postmarkSuccessResponse());
+      await connector.send({
+        from: 'sender@example.com',
+        to: 'r@example.com',
+        subject: 'Hi',
+        html: '<p>Hi</p>',
+        _passthrough: { body: { MessageStream: 'outbound' } },
+      });
+      const [url, init] = mockFetch.mock.calls[0]!;
+      expect(url).toBe('https://api.postmarkapp.com/email');
+      const body = JSON.parse((init as RequestInit).body as string) as Record<string, unknown>;
+      expect(body.Subject).toBe('Hi');
+      expect(body.HtmlBody).toBe('<p>Hi</p>');
+    });
+
+    it('sendMessage(): a passthrough TemplateId routes to /email/withTemplate too', async () => {
+      mockFetch.mockResolvedValueOnce(postmarkSuccessResponse());
+      await connector.sendMessage(
+        { to: ['r@example.com'], subject: 'unused', html: '<p>unused</p>' },
+        { _passthrough: { body: { TemplateId: 99, TemplateModel: {} } } },
+      );
+      const [url, init] = mockFetch.mock.calls[0]!;
+      expect(url).toBe('https://api.postmarkapp.com/email/withTemplate');
+      const body = JSON.parse((init as RequestInit).body as string) as Record<string, unknown>;
+      expect(body).not.toHaveProperty('Subject');
+      expect(body).not.toHaveProperty('HtmlBody');
+    });
+
+    // Postmark HTTP codes: 413 "exceeded Postmark's size limit of 10 MB",
+    // 415 "missing the expected request headers", 404 "resource/entity that
+    // does not exist".
+    it.each([404, 413, 415, 400])('maps HTTP %i to invalid_request', async (status) => {
+      mockFetch.mockResolvedValueOnce(postmarkErrorResponse(status, { ErrorCode: 0, Message: 'x' }));
+      const err = await connector
+        .send({ from: 'sender@example.com', to: 'r@example.com', subject: 'x', text: 't' })
+        .catch((e: unknown) => e);
+      expect((err as ConnectorError).providerCode).toBe('invalid_request');
+    });
+
+    it('sendMessage(): a camelCase templateAlias is recased and routes to /email/withTemplate', async () => {
+      mockFetch.mockResolvedValueOnce(postmarkSuccessResponse());
+      await connector.sendMessage(
+        { to: ['r@example.com'], subject: 'unused', html: '<p>u</p>' },
+        { _passthrough: { body: { templateAlias: 'welcome' } } },
+      );
+      const [url, init] = mockFetch.mock.calls[0]!;
+      expect(url).toBe('https://api.postmarkapp.com/email/withTemplate');
+      const body = JSON.parse((init as RequestInit).body as string) as Record<string, unknown>;
+      expect(body.TemplateAlias).toBe('welcome');
+      expect(body).not.toHaveProperty('templateAlias');
+    });
+
+    it('from: a display name with specials is quoted (Postmark: "\\"Joe Receiver, Jr.\\" <…>")', async () => {
+      mockFetch.mockResolvedValueOnce(postmarkSuccessResponse());
+      await new PostmarkEmailConnector({ ...defaultConfig, senderName: 'Joe Sender, Jr.' }).send({
+        from: 'sender@example.com',
+        to: 'r@example.com',
+        subject: 'x',
+        text: 't',
+      });
+      const body = JSON.parse((mockFetch.mock.calls[0]![1] as RequestInit).body as string) as { From: string };
+      expect(body.From).toBe('"Joe Sender, Jr." <sender@example.com>');
     });
 
     it('maps 422 with ErrorCode 1003 (InvalidEmailRequest) to invalid_request', async () => {
@@ -757,8 +904,9 @@ describe('PostmarkEmailConnector', () => {
         expect(err).toBeInstanceOf(ConnectorError);
         const connectorErr = err as ConnectorError;
         expect(connectorErr.statusCode).toBe(422);
-        // Same classification path as send(): mapPostmarkErrorToProviderCode
-        expect(connectorErr.providerCode).toBe('invalid_recipient');
+        // Same classification path as send(): ErrorCode 300 is "send
+        // validation"; with no invalid-address message it is invalid_request.
+        expect(connectorErr.providerCode).toBe('invalid_request');
         expect(connectorErr.providerMessage).toBe('Invalid email request');
       }
     });

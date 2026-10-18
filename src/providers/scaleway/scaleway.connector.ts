@@ -8,7 +8,7 @@ import type {
 import { ChannelTypeEnum } from '../../types';
 import { ConnectorError } from '../../types';
 import type { ProviderCode } from '../../types';
-import { mergePassthrough } from '../../utils';
+import { encodePathSegment, mergePassthrough } from '../../utils';
 import { parseRetryAfter } from '../../utils';
 import { encodeBase64Utf8, encodeBase64Bytes } from '../../utils';
 import type { ScalewayConfig, ScalewayRegion } from './scaleway.config';
@@ -103,6 +103,7 @@ export class ScalewayEmailConnector
         body: serializedBody,
       });
     } catch (error) {
+      if (error instanceof ConnectorError) throw error;
       if ((error as Error)?.name === 'AbortError') {
         throw new ConnectorError({
           message: (error as Error).message ?? 'Request cancelled',
@@ -151,7 +152,19 @@ export class ScalewayEmailConnector
    */
   private resolveEndpoint(): string {
     const region = this.config.region ?? DEFAULT_REGION;
-    return `${SCALEWAY_API_BASE}/regions/${region}/emails`;
+    // The region is a path segment of the URL the secret key goes to, so it
+    // must have Scaleway's `xx-yyy` region shape; anything else (a `/`, `..`,
+    // `?`) could re-route the credentialed request within the API host.
+    if (!/^[a-z]{2}-[a-z]{3}$/.test(region)) {
+      const message = `Scaleway region ${JSON.stringify(region)} is not a Scaleway region name (e.g. "fr-par").`;
+      throw new ConnectorError({
+        message,
+        statusCode: null,
+        providerCode: 'invalid_request',
+        providerMessage: message,
+      });
+    }
+    return `${SCALEWAY_API_BASE}/regions/${encodePathSegment(region, 'Scaleway region')}/emails`;
   }
 
   /**

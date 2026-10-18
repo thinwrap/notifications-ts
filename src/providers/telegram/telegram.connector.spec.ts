@@ -127,6 +127,26 @@ describe('TelegramChatConnector', () => {
       expect(body.messageThreadId).toBeUndefined();
     });
 
+    // tdlib/telegram-bot-api: 403 "Forbidden: bot was blocked by the user" /
+    // "user is deactivated" / "bot was kicked from the group chat"; 401
+    // "Unauthorized: invalid token specified"; 404 "Not Found" for a malformed
+    // /bot<token>/ path (python-telegram-bot maps 404 to InvalidToken).
+    it.each([
+      [403, 'Forbidden: bot was blocked by the user', 'invalid_recipient'],
+      [403, 'Forbidden: user is deactivated', 'invalid_recipient'],
+      [403, 'Forbidden: bot was kicked from the group chat', 'invalid_recipient'],
+      [401, 'Unauthorized: invalid token specified', 'auth_failed'],
+      [404, 'Not Found', 'auth_failed'],
+      [502, 'Bad Gateway', 'provider_unavailable'],
+    ] as const)('maps HTTP %i "%s" → %s', async (status, description, expected) => {
+      mockFetch.mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: false, error_code: status, description }), { status }),
+      );
+      const err = await connector.send({ to: '123', body: 'x' }).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(ConnectorError);
+      expect((err as ConnectorError).providerCode).toBe(expected);
+    });
+
     it('maps HTTP 400 + "chat not found" description to invalid_recipient', async () => {
       mockFetch.mockResolvedValueOnce(
         errorResponse(400, {
@@ -345,8 +365,9 @@ describe('TelegramChatConnector', () => {
         expect(err).toBeInstanceOf(ConnectorError);
         const connectorErr = err as ConnectorError;
         expect(connectorErr.statusCode).toBe(403);
-        // Same classification path as send(): mapVendorError
-        expect(connectorErr.providerCode).toBe('auth_failed');
+        // Bot API: USER_IS_BLOCKED → 403 "bot was blocked by the user", a
+        // recipient-scoped refusal, not a credential problem.
+        expect(connectorErr.providerCode).toBe('invalid_recipient');
         expect(connectorErr.providerMessage).toBe('Forbidden: bot was blocked by the user');
       }
     });
