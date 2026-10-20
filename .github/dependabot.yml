@@ -1,0 +1,30 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    # Version-update PRs are off; security updates still run and still honour
+    # the ignore rules below.
+    open-pull-requests-limit: 0
+    # Each of these majors drops Node 18, which the package still supports and
+    # CI still tests, so their PRs fail the Node 18 cells; vitest/vite majors
+    # also peer-conflict with each other and fail `npm ci` with ERESOLVE.
+    # Majors move by hand. A `versions` range (unlike `update-types`, which
+    # filters version updates only) also holds back security-update PRs that
+    # jump a major.
+    ignore:
+      - dependency-name: vitest
+        versions: ['>=4.0.0']
+      - dependency-name: '@vitest/*'
+        versions: ['>=4.0.0']
+      - dependency-name: vite
+        versions: ['>=7.0.0']
+      - dependency-name: eslint
+        versions: ['>=10.0.0']
+      - dependency-name: '@eslint/js'
+        versions: ['>=10.0.0']
+      - dependency-name: size-limit
+        versions: ['>=12.0.0']
+      - dependency-name: '@size-limit/*'
+        versions: ['>=12.0.0']

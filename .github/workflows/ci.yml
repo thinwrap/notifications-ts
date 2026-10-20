@@ -1,16 +1,15 @@
-# .github/workflows/ci.yml
-#
-# CI matrix: Linux/macOS/Windows x Node 18/20/22/24/26.
-#
-# Three jobs:
-#   - test:                     15-cell OS x Node matrix; lint + typecheck + test + build
-#   - network-disabled-smoke:   install + build + test with outbound network blocked
-#   - bundle-size:              Tier A <=15 KB / Tier B <=30 KB (report-only at PR)
-#
-# Self-contained: no external reusable workflows. Cross-language TS<->PHP parity
-# is a nice-to-have, not a CI gate.
-
 name: CI
+
+# Linux/macOS/Windows × Node 18/20/22/24/26 (the package floor is >=18).
+#
+#   - test:                    15-cell OS × Node matrix; typecheck, test, lint,
+#                              build, plain-Node dist import smoke
+#   - network-disabled-smoke:  the same gates with no network, plus proof that
+#                              importing and constructing a facade makes no calls
+#   - bundle-size:             per-entry gzip ceilings + tree-shaking spot-check
+#
+# Repo-level gates (license, lifecycle scripts, README/.ai presence) live in
+# lint-gates.yml. Self-contained: no external reusable workflows.
 
 on:
   pull_request:
@@ -45,8 +44,8 @@ jobs:
           cache: npm
 
       # --no-audit/--no-fund skip the extra registry calls; the fetch flags
-      # cap npm's very patient defaults (5-min fetch-timeout x retries) so a
-      # stalled registry connection fails the step in minutes, not hours.
+      # cap npm's very patient defaults so a stalled registry connection
+      # fails the step in minutes, not hours.
       - run: npm ci --no-audit --no-fund --fetch-timeout=60000 --fetch-retries=3 --fetch-retry-maxtimeout=15000
         timeout-minutes: 8
 
@@ -67,8 +66,8 @@ jobs:
 
       # Import-smoke the built output with plain Node (CJS require + ESM
       # import). Bundler-based steps tolerate extensionless specifiers that
-      # Node's ESM loader rejects — this is the gate that catches a broken
-      # dist/esm emit (the v1.0.0 packaging bug).
+      # Node's ESM loader rejects, so this is the gate that catches a broken
+      # dist/esm emit.
       - run: npm run check:dist
 
       - name: Upload coverage
@@ -96,16 +95,14 @@ jobs:
       - run: npm ci --no-audit --no-fund --fetch-timeout=60000 --fetch-retries=3 --fetch-retry-maxtimeout=15000
         timeout-minutes: 8
 
-      # Run the full offline gate inside a network NAMESPACE (`unshare -n`):
-      # the namespace has no interface except an isolated loopback, so no
-      # egress is possible at any privilege level — a stronger guarantee than
-      # firewall rules. Crucially, the Actions runner agent lives OUTSIDE the
-      # namespace and keeps streaming logs/heartbeats. (The previous
-      # iptables-based approach REJECTed all non-root egress, which also
-      # killed the runner agent itself — it runs as the same non-root
-      # `runner` user — so the job went dark and hung until GitHub declared
-      # the runner lost. Do not reintroduce host-wide firewall rules here.)
-      - name: Offline gate — typecheck, test, lint, build (no egress)
+      # Everything below runs inside a network NAMESPACE (`unshare -n`): it has
+      # no interface except an isolated loopback, so no egress is possible at
+      # any privilege level. The Actions runner agent lives OUTSIDE the
+      # namespace and keeps streaming logs. Do NOT swap this for host-wide
+      # firewall rules (iptables): they also cut off the runner agent (same
+      # non-root `runner` user) and the job hangs until GitHub declares the
+      # runner lost.
+      - name: Offline gate — typecheck, test, lint, build, dist smoke (no egress)
         timeout-minutes: 12
         run: |
           sudo env "PATH=$PATH" "HOME=$HOME" unshare -n bash -e -c '
@@ -117,9 +114,21 @@ jobs:
             npm run check:dist
           '
 
+      # The namespace stops sockets; the fetch guard names the culprit if an
+      # import-time call is ever introduced.
+      - name: Import + construct without network
+        run: |
+          sudo env "PATH=$PATH" "HOME=$HOME" unshare -n node -e "
+            globalThis.fetch = () => { throw new Error('Unexpected import-time fetch'); };
+            const lib = require('./dist/cjs/index.js');
+            const f = new lib.Email('sendgrid', { apiKey: 'k' });
+            if (f.id !== 'sendgrid') { console.error('expected id sendgrid'); process.exit(1); }
+            console.log('OK — import + construction made zero network calls.');
+          "
+
+      # Self-test of the gate itself: the same namespace must FAIL a real
+      # network call. Guards against unshare silently degrading.
       - name: Prove the namespace actually blocks egress
-        # Self-test of the gate itself: the same namespace must FAIL a real
-        # network call. Guards against unshare silently degrading.
         run: |
           if sudo unshare -n curl -s --max-time 5 https://registry.npmjs.org/ > /dev/null 2>&1; then
             echo "::error::Network namespace did not block egress — offline gate is not actually offline."
@@ -127,12 +136,14 @@ jobs:
           fi
           echo "OK — egress blocked inside the namespace."
 
+  # `npm run size` (size-limit) bundles each entry in `.size-limit.json` with
+  # esbuild (tree-shaking + minify), gzips it, and fails over its ceiling:
+  #   Tier A connector < 15 KB · Tier B connector < 30 KB
+  # Node built-ins are ignored — they're provided by the runtime, not shipped.
   bundle-size:
-    name: bundle size tiers
+    name: bundle size
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    # Self-contained: runs `npm run size` (size-limit) + `npm run check:tree-shaking`
-    # (esbuild spot-check) against the per-connector tier ceilings in `.size-limit.json`.
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -146,9 +157,10 @@ jobs:
       - run: npm ci --no-audit --no-fund --fetch-timeout=60000 --fetch-retries=3 --fetch-retry-maxtimeout=15000
         timeout-minutes: 8
 
+      # check:tree-shaking bundles the built dist/esm entry, so build first.
       - run: npm run build
 
-      - name: Bundle-size tier-gate
+      - name: Bundle-size gate
         run: npm run size
 
       - name: Tree-shaking spot-check

@@ -2,11 +2,13 @@ name: Publish to npm
 
 # OIDC publish-to-npm with Sigstore provenance.
 #
-# Publish job is inlined (not delegated to an external reusable workflow) so
-# the full publish path is auditable in this repo. Sigstore attests the
-# workflow source; OIDC trusted publishing means no NPM_TOKEN is consumed.
-# Two-factor authentication on the npm publishing account is a manual
-# precondition of tagging.
+# The publish job is inlined (not delegated to an external reusable workflow)
+# so the full publish path is auditable in this repo. Sigstore attests the
+# workflow source; OIDC trusted publishing means no NPM_TOKEN is consumed. The
+# npm trusted publisher for @thinwrap/notifications must reference THIS filename
+# (release.yml) — renaming the file breaks publishing. Two-factor
+# authentication on the npm publishing account is a manual precondition of
+# tagging.
 #
 # Trigger: push of a `v*.*.*` tag. Branch protection does not cover tags, so
 # the job refuses to publish unless the tagged commit is on `main`.
@@ -71,7 +73,12 @@ jobs:
             exit 1
           fi
 
-      - run: npm ci --no-audit --no-fund --fetch-timeout=60000 --fetch-retries=3 --fetch-retry-maxtimeout=15000
+      # --ignore-scripts: this job holds `id-token: write`, so a dependency's
+      # install script must not run here. Nothing needs one: the package has no
+      # runtime deps, the build is plain tsc, and esbuild (via vitest and
+      # size-limit) resolves its platform binary from the optional dependency
+      # without its postinstall.
+      - run: npm ci --ignore-scripts --no-audit --no-fund --fetch-timeout=60000 --fetch-retries=3 --fetch-retry-maxtimeout=15000
         timeout-minutes: 8
 
       - run: npm run typecheck
@@ -83,7 +90,7 @@ jobs:
       - run: npm run build
 
       # Plain-Node import smoke of dist (CJS + ESM) — catches broken emits
-      # that bundler-resolution steps cannot (the v1.0.0 packaging bug).
+      # that bundler-resolution steps cannot.
       - run: npm run check:dist
 
       - run: npm run size
