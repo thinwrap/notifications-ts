@@ -63,7 +63,7 @@ npm run build && npm run check:dist   # dual CJS/ESM emit + import smoke
 npm run size             # per-connector gzip budget
 ```
 
-CI runs these across a Node 18/20/22 × Linux/macOS/Windows matrix, plus an offline (network-disabled)
+CI runs these across a Node 18/20/22/24/26 × Linux/macOS/Windows matrix, plus an offline (network-disabled)
 import smoke that proves zero import-time egress.
 
 ## Invariants you must not break
